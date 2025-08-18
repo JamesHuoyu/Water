@@ -1,0 +1,91 @@
+units real
+atom_style full
+boundary p p p
+
+read_data 1H2O
+replicate 8 8 8
+
+pair_style lj/cut/tip4p/long 1 2 1 1 0.1546 12
+kspace_style pppm/tip4p 1.0e-6
+
+bond_style harmonic
+angle_style harmonic
+
+pair_coeff 1 1 0.18521 3.1589 #O-O
+pair_coeff 1 2 0.0 0.0 #O-H
+pair_coeff 2 2 0.0 1.0 #H-H
+pair_modify tail yes
+
+bond_coeff 1 1000.0 0.9572 #O-H
+angle_coeff 1 100.0 104.52 #H-O-H
+
+group gH2O type 1 2
+group gO type 1
+
+neighbor 3.0 bin
+neigh_modify delay 0 every 1 check yes
+
+minimize 1.0e-4 1.0e-6 1000 10000
+reset_timestep 0
+variable T equal 280.0
+
+velocity all create ${T} 12345 dist gaussian
+fix 1 gH2O shake 1.0e-4 100 0 b 1 a 1
+
+variable kB equal 8.617333e-5    # eV/K (real单位制)
+variable massAll equal mass(all)/6.022e23
+variable volCm3 equal vol*1.0e-24
+variable density_sys equal v_massAll/v_volCm3
+variable enthalpy equal etotal + press*vol
+variable temp equal temp
+
+
+timestep 2.0 # 2fs
+
+fix fnpt all npt temp ${T} ${T} 100.0 iso 0.9869 0.9869 500.0
+thermo 1000
+thermo_style custom step temp vol v_density_sys etotal press v_enthalpy
+run 1000000 # 2 ns
+unfix fnpt
+
+
+    
+# fix  integ all nve
+
+# dump mydump gO custom 5 isf_oxy_${T}.lammpstrj id type x y z ix iy iz
+
+# thermo 1000
+# thermo_style custom step temp vol etotal press v_density_sys v_enthalpy
+# run 1000000 # 2 ns
+# undump mydump
+# unfix integ
+
+
+# fix fvol all vector 1 c_vol
+# fix ftemp all vector 1 c_temp
+# fix fenthalpy all vector 1 v_enthalpy
+
+# variable Vavg equal ave(f_fvol)
+# variable Vsqavg equal ave(f_fvol*f_fvol)
+# variable Vvar equal v_Vsqavg - v_Vavg*v_Vavg
+# variable compressibility equal v_Vvar/(v_kB*temp*v_Vavg)
+
+
+# variable Havg equal ave(f_fenthalpy)
+# variable Hsqavg equal ave(f_fenthalpy*f_fenthalpy)
+# variable Hvar equal v_Hsqavg - v_Havg*v_Havg
+# variable Cp equal v_Hvar/(v_kB*v_Tvar)
+
+# fix f_den_out all ave/time 500 2 1000 v_temp v_density_sys file density.out
+
+# fix fnpt all npt temp 298.15 263.15 100.0 iso 0.9869 0.9869 500.0 
+
+# dump mydump gO custom 1000 trajectory.lammpstrj id type x y z ix iy iz
+
+# thermo 500
+# thermo_style custom step temp vol v_density_sys etotal press
+
+
+# timestep 1.0
+
+# run 1000000

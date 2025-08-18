@@ -1,0 +1,15 @@
+DeepPotential/DNN@MB-pol/log.*
+DeepPotential/DNN@MB-pol/graph-compress.pb:Zone.Identifier
+DeepPotential/liquid-density/*:Zone.Identifier
+DeepPotential/vle/*:Zone.Identifier
+TIP4P/2005/output/
+TIP4P/2005/298test/*.data
+TIP4P/2005/298test/log.*
+TIP4P/2005/298test/trajectory.*
+TIP4P/2005/298test/*.rdf1
+TIP4P/2005/density/log.*
+TIP4P/2005/density/*.txt
+TIP4P/2005/*.csv
+TIP4P/2005/*.png
+TIP4P/2005/*.lammpstrj
+TIP4P/2005/log.*

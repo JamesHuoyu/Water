@@ -1,0 +1,52 @@
+# bulk water
+
+units           metal
+boundary        p p p
+atom_style      atomic
+
+neighbor        1.0 bin
+neigh_modify    every 10 delay 0 check no
+
+read_data       conf.lmp
+mass            1 16.000000
+mass            2 1.00784
+
+pair_style	deepmd ./graph.pb
+pair_coeff	* *	
+
+velocity        all create 218 79620390
+
+fix             1 all npt temp 218 218 0.1 iso 1.01325 1.01325 1
+timestep        0.0005
+
+variable        dt equal dt
+
+# equilibration run
+
+thermo          1000
+run             10000
+
+# data gathering run
+
+reset_timestep  0
+
+compute         myRDF all rdf 1000 1 1 1 2 2 2
+fix             rdfout all ave/time 1000 1 1000 c_myRDF[*] file tmp.rdf mode vector ave running
+
+group           ox type 1
+compute         msd ox msd com yes
+variable        twopoint equal c_msd[4]/6/(step*dt+1.0e-6)
+fix             9 ox vector 10 c_msd[4]
+variable        fitslope equal slope(f_9)/6/(10*dt)
+
+thermo_style    custom step pe ke etotal temp press vol density c_msd[4] v_twopoint v_fitslope
+thermo          100
+dump            1 all custom 100 lmp.lammpstrj id type x y z
+dump_modify     1 format line "%d %d %20.15g %20.15g %20.15g"
+dump_modify     1 sort id append yes
+
+restart         100000 restart_a restart_b
+
+run             7000000
+write_data      finalconfig
+

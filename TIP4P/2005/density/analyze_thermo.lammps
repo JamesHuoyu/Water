@@ -1,0 +1,84 @@
+units real
+atom_style full
+boundary p p p
+
+read_data ../1H2O
+replicate 8 8 8
+
+pair_style lj/cut/tip4p/long 1 2 1 1 0.1546 12
+kspace_style pppm/tip4p 1.0e-6
+
+bond_style harmonic 
+angle_style harmonic
+
+pair_coeff 1 1 0.18521 3.1589 #O-O
+pair_coeff 1 2 0.0 0.0 #O-H
+pair_coeff 2 2 0.0 1.0 #H-H
+pair_modify tail yes
+
+bond_coeff 1 1000.0 0.9572 #O-H
+angle_coeff 1 100.0 104.52 #H-O-H
+
+group gH2O type 1 2
+group gO type 1
+
+neighbor 3.0 bin
+neigh_modify delay 0 every 1 check yes
+
+minimize 1.0e-4 1.0e-6 1000 10000
+reset_timestep 0
+
+
+variable T_start equal 340
+variable T_end equal 270
+variable T_step equal 5
+variable nT equal (v_T_start - v_T_end)/v_T_step + 1
+
+
+variable kB equal 8.617333e-5    # eV/K (real单位制)
+variable massAll equal mass(all)/6.022e23
+variable volCm3 equal vol*1.0e-24
+variable density_sys equal v_massAll/v_volCm3
+variable n equal 0
+
+timestep 2.0 # 2fs
+
+label loop_T
+variable T equal ${T_start} - ${T_step} * ${n}
+if "${T} < ${T_end}" then "jump SELF loop_end"
+
+print "Running simulation at T = ${T} K"
+
+velocity gH2O create ${T} 12345 dist gaussian
+fix 1 gH2O shake 1.0e-4 100 0 b 1 a 1
+
+fix fnpt gH2O npt temp ${T} ${T} 100.0 iso 0.9869 0.9869 500.0
+thermo_style custom step temp press vol etotal enthalpy
+thermo 1000
+run 50000 # 100 ps
+
+variable block equal 1000
+variable nblock equal 100
+
+variable temp equal temp
+variable enthalpy equal etotal + press*vol
+variable press equal press
+variable vol equal vol
+variable etotal equal etotal
+
+
+variable steps equal ${block}*${nblock}
+fix fAVG all ave/time 1 ${block} ${block} &
+  v_temp v_press v_vol v_etotal v_enthalpy file thermo_${T}.txt
+
+run ${steps}
+
+unfix fAVG
+unfix fnpt
+unfix 1
+
+variable n equal ${n} + 1
+jump SELF loop_T
+label loop_end
+
+
