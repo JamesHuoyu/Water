@@ -7,6 +7,7 @@ TIP4P/2005/298test/*.data
 TIP4P/2005/298test/log.*
 TIP4P/2005/298test/trajectory.*
 TIP4P/2005/298test/*.rdf1
+TIP4P/2005/298test/*.png
 TIP4P/2005/density/log.*
 TIP4P/2005/density/*.txt
 TIP4P/2005/*.csv
