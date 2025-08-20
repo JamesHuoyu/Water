@@ -10,6 +10,7 @@ TIP4P/2005/rdf/*.rdf1
 TIP4P/2005/rdf/*.png
 TIP4P/2005/thermo/log.*
 TIP4P/2005/thermo/*.txt
+TIP4P/2005/thermo/*.png
 TIP4P/2005/isf/*.csv
 TIP4P/2005/isf/*.png
 TIP4P/2005/isf/*.lammpstrj
