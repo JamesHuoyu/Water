@@ -2,7 +2,7 @@ units real
 atom_style full 
 boundary p p p
 
-read_data 1H2O
+read_data ../1H2O
 replicate 8 8 8
 
 pair_style lj/cut/tip4p/long 1 2 1 1 0.1546 12
@@ -48,4 +48,4 @@ fix 2 gH2O ave/time 1000 1 1000 c_rdf1[*] file tmp.rdf1 mode vector
 
 run 1000
 
-write_data 16by16by16_H20.data pair ij
+write_data 8by8by8_H20.data pair ij

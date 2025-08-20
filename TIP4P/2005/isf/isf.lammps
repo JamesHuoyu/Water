@@ -2,7 +2,7 @@ units real
 atom_style full
 boundary p p p
 
-read_data 1H2O
+read_data ../1H2O
 replicate 8 8 8
 
 pair_style lj/cut/tip4p/long 1 2 1 1 0.1546 12
@@ -49,43 +49,31 @@ run 1000000 # 2 ns
 unfix fnpt
 
 
-    
-# fix  integ all nve
+# NVE ensemble 记录轨迹
+fix  integ all nve
 
-# dump mydump gO custom 5 isf_oxy_${T}.lammpstrj id type x y z ix iy iz
+dump mydump gO custom 5 isf_oxy_${T}.lammpstrj id type x y z ix iy iz
 
-# thermo 1000
-# thermo_style custom step temp vol etotal press v_density_sys v_enthalpy
-# run 1000000 # 2 ns
-# undump mydump
-# unfix integ
+thermo 1000
+thermo_style custom step temp vol etotal press v_density_sys v_enthalpy
+run 1000000 # 2 ns
+undump mydump
+unfix integ
 
-
-# fix fvol all vector 1 c_vol
-# fix ftemp all vector 1 c_temp
-# fix fenthalpy all vector 1 v_enthalpy
-
-# variable Vavg equal ave(f_fvol)
-# variable Vsqavg equal ave(f_fvol*f_fvol)
-# variable Vvar equal v_Vsqavg - v_Vavg*v_Vavg
-# variable compressibility equal v_Vvar/(v_kB*temp*v_Vavg)
-
-
-# variable Havg equal ave(f_fenthalpy)
-# variable Hsqavg equal ave(f_fenthalpy*f_fenthalpy)
-# variable Hvar equal v_Hsqavg - v_Havg*v_Havg
-# variable Cp equal v_Hvar/(v_kB*v_Tvar)
 
 # fix f_den_out all ave/time 500 2 1000 v_temp v_density_sys file density.out
 
-# fix fnpt all npt temp 298.15 263.15 100.0 iso 0.9869 0.9869 500.0 
-
-# dump mydump gO custom 1000 trajectory.lammpstrj id type x y z ix iy iz
-
-# thermo 500
-# thermo_style custom step temp vol v_density_sys etotal press
 
 
-# timestep 1.0
+# NPT ensemble 记录轨迹
+fix fnpt all npt temp 298.15 263.15 100.0 iso 0.9869 0.9869 500.0 
 
-# run 1000000
+dump mydump gO custom 1000 trajectory.lammpstrj id type x y z ix iy iz
+
+thermo 500
+thermo_style custom step temp vol v_density_sys etotal press
+
+
+timestep 1.0
+
+run 1000000
