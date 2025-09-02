@@ -15,3 +15,13 @@ TIP4P/2005/isf/*.csv
 TIP4P/2005/isf/*.png
 TIP4P/2005/isf/*.lammpstrj
 TIP4P/2005/isf/log.*
+TIP4P/2005/msd/*.data
+TIP4P/2005/msd/*.png
+TIP4P/2005/msd/log.*
+TIP4P/2005/msd/*.lammpstrj
+TIP4P/2005/msd/tmp.*
+TIP4P/2005/test/dump_*.lammpstrj
+TIP4P/2005/test/*.png
+TIP4P/2005/test/log.*
+TIP4P/2005/test/*.data
+TIP4P/2005/test/*.rdf1
