@@ -10,3 +10,6 @@ DeepPotential/vle/*:Zone.Identifier
 *.txt
 *.npy
 log.*
+tmp.*
+*.zip
+*.tar.gz
