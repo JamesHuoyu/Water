@@ -66,6 +66,9 @@ def parse_args():
         default="self",
         help="Choose 'self' for self-intermediate scattering function, 'coherent' for coherent scattering function.",
     )
+    p.add_argument(
+        "--unwrapped", action="store_true", help="Input positions are already unwrapped."
+    )
     return p.parse_args()
 
 
@@ -87,7 +90,7 @@ def k_shell_vectors(Lx, Ly, Lz, k_target, dk):
     return ks  # shape (M,3)
 
 
-def read_dump_frames(filenames):
+def read_dump_frames(filenames, unwrapped=False):
     """Generator yields (timestep, box_bounds, triclinic_flag, positions, images).
     positions: (N,3) float, images: (N,3) int, sorted by atom id.
     Assumes dump contains only a single species (O) OR arbitrary but we will use all atoms as oxygen group.
@@ -128,10 +131,17 @@ def read_dump_frames(filenames):
                 ), "Unexpected dump format: expecting ATOMS"
                 fields = atoms_hdr.split()[2:]
                 field_idx = {name: i for i, name in enumerate(fields)}
-                required = ["id", "x", "y", "z", "ix", "iy", "iz"]
-                for r in required:
-                    if r not in field_idx:
-                        raise RuntimeError(f"Dump must include field '{r}'. Found: {fields}")
+
+                if unwrapped:
+                    required = ["id", "xu", "yu", "zu"]
+                    for r in required:
+                        if r not in field_idx:
+                            raise RuntimeError(f"Dump must include field '{r}'. Found: {fields}")
+                else:
+                    required = ["id", "x", "y", "z", "ix", "iy", "iz"]
+                    for r in required:
+                        if r not in field_idx:
+                            raise RuntimeError(f"Dump must include field '{r}'. Found: {fields}")
                 # read atoms
                 arr = np.empty((Nat, len(fields)), dtype=float)
                 ids = np.empty(Nat, dtype=int)
@@ -146,13 +156,22 @@ def read_dump_frames(filenames):
                 # sort by id
                 order = np.argsort(ids)
                 arr = arr[order]
-                pos = np.stack(
-                    [arr[:, field_idx["x"]], arr[:, field_idx["y"]], arr[:, field_idx["z"]]], axis=1
-                ).astype(float)
-                img = np.stack(
-                    [arr[:, field_idx["ix"]], arr[:, field_idx["iy"]], arr[:, field_idx["iz"]]],
-                    axis=1,
-                ).astype(int)
+
+                if unwrapped:
+                    pos = np.stack(
+                        [arr[:, field_idx["xu"]], arr[:, field_idx["yu"]], arr[:, field_idx["zu"]]],
+                        axis=1,
+                    ).astype(float)
+                    img = np.zeros_like(pos, dtype=int)
+                else:
+                    pos = np.stack(
+                        [arr[:, field_idx["x"]], arr[:, field_idx["y"]], arr[:, field_idx["z"]]],
+                        axis=1,
+                    ).astype(float)
+                    img = np.stack(
+                        [arr[:, field_idx["ix"]], arr[:, field_idx["iy"]], arr[:, field_idx["iz"]]],
+                        axis=1,
+                    ).astype(int)
                 yield (nstep, bounds, triclinic, pos, img)
 
 
@@ -197,7 +216,7 @@ def main():
     t_lags_ps = lags * dt_ps
 
     # Read first frame to determine box and k-vectors
-    gen = read_dump_frames(args.dumps)
+    gen = read_dump_frames(args.dumps, unwrapped=args.unwrapped)
     try:
         nstep0, bounds0, triclinic0, pos0, img0 = next(gen)
     except StopIteration:
@@ -235,7 +254,10 @@ def main():
     Fs_count = np.zeros_like(t_lags_ps, dtype=int)
 
     # Process first frame
-    uw0 = unwrap_positions(pos0, img0, bounds0)
+    if args.unwrapped:
+        uw0 = pos0
+    else:
+        uw0 = unwrap_positions(pos0, img0, bounds0)
     if args.no_com_removal:
         com0 = np.zeros(3)
     else:
@@ -282,11 +304,14 @@ def main():
                     dr = chunk_i[:, np.newaxis, :] - chunk_j[np.newaxis, :, :]
                     phases = np.tensordot(dr, ksT, axes=([2], [0]))
                     total_cos += np.sum(np.cos(phases))
-            return total_cos / n_atoms
+            return total_cos / (n_atoms * n_atoms)
 
     # Consume the rest frames
     for nstep, bounds, tric, pos, img in gen:
-        uw = unwrap_positions(pos, img, bounds)
+        if args.unwrapped:
+            uw = pos
+        else:
+            uw = unwrap_positions(pos, img, bounds)
         com = np.zeros(3) if args.no_com_removal else uw.mean(axis=0)
         unwrapped_buf.append(uw)
         com_buf.append(com)
@@ -459,6 +484,7 @@ def main():
             "n_kvectors": int(ks.shape[0]),
             "tau_alpha_ps_e1": float(tau_alpha_ps) if np.isfinite(tau_alpha_ps) else None,
             "kww_fit": fit_res,
+            "unwrapped_coords": args.unwrapped,
         }
         g.write("# " + json.dumps(meta) + "\n")
         g.write("t_ps,Fs,sem,n_origins\n")

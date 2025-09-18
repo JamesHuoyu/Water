@@ -72,7 +72,7 @@ def load_dump_to_array(filename, type_filter=None):
 
 
 X = load_dump_to_array(
-    "/home/debian/water/TIP4P/2005/benchmark/results/dump_H2O.lammpstrj", type_filter=1
+    "/home/debian/water/TIP4P/2005/benchmark/220/quenching/dump_H2O.lammpstrj", type_filter=1
 )
 print(X.shape)  # (T,N,3)
 
@@ -87,5 +87,5 @@ plt.hist(q_values, bins=500, histtype="step", density=True)
 plt.xlabel("q")
 plt.ylabel("Probability Density")
 plt.title("Distribution of Tetrahedral Order Parameter q")
-# plt.savefig("q_distribution.png")
+plt.savefig("quenching/q_distribution.png", dpi=300)
 plt.show()

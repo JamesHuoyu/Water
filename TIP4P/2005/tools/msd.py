@@ -6,34 +6,56 @@ import pandas as pd
 from tqdm import tqdm
 from scipy.stats import linregress
 
-if __name__ == "__main__":
-    # dump_file = "/home/debian/water/TIP4P/2005/benchmark/results/dump_H2O_old.lammpstrj"
-    # print("Loading trajectory...")
-    # u = mda.Universe(dump_file, format="LAMMPSDUMP")
-    # print("Running MSD analysis...")
-    # msd_analysis = EinsteinMSD(
-    #     u,
-    #     select="type 1",
-    #     msd_type="xyz",
-    #     fft=True,
-    #     time_origin="all",
-    # )
-    # msd_analysis.run()
-    # bias = 30000000
-    # times = (msd_analysis.times - bias) * 0.002  # Convert to ps assuming timestep of 2 fs
-    # print(times)
-    # msd_values = msd_analysis.results.timeseries
-    # plt.figure(figsize=(8, 6))
-    # plt.plot(times, msd_values, label="MSD")
-    # plt.xlabel("Time (ps)")
-    # plt.ylabel("Mean Squared Displacement (Å²)")
-    # plt.title("Mean Squared Displacement vs Time")
-    # plt.legend()
-    # plt.savefig("msd_plot.png", dpi=300)
-    # plt.show()
-    # pd.DataFrame({"time_ps": times, "msd_A2": msd_values}).to_csv("msd_data.csv", index=False)
 
-    df = pd.read_csv("msd_data.csv")
+def calculate_msd(universe, start_time, end_time):
+    O_atoms = universe.select_atoms("type 1")
+    n_frames = len(universe.trajectory)
+    n_water = len(O_atoms)
+    positions = np.zeros((n_frames, n_water, 3))
+
+    for i, ts in enumerate(universe.trajectory):
+        positions[i] = O_atoms.positions  # 使用 unwrapped 坐标
+
+    msd_values = []
+    for t in range(start_time, end_time):
+        displacements = positions[t:] - positions[:-t]  # 计算位移
+        squared_displacements = np.sum(displacements**2, axis=2)  # 每个原子平方位移
+        msd = np.mean(squared_displacements)  # 计算 MSD
+        msd_values.append(msd)
+
+    return np.array(msd_values)
+
+
+if __name__ == "__main__":
+    dump_file = "/home/debian/water/TIP4P/2005/benchmark/220/quenching/dump_H2O.lammpstrj"
+    print("Loading trajectory...")
+    u = mda.Universe(dump_file, format="LAMMPSDUMP")
+    print("Running MSD analysis...")
+    msd_analysis = EinsteinMSD(
+        u,
+        select="type 1",
+        msd_type="xyz",
+        fft=True,
+        time_origin="all",
+    )
+    msd_analysis.run()
+    bias = 15500000
+    times = (msd_analysis.times - bias) * 0.002  # Convert to ps assuming timestep of 2 fs
+    print(times)
+    msd_values = msd_analysis.results.timeseries
+    plt.figure(figsize=(8, 6))
+    plt.plot(times, msd_values, label="MSD")
+    plt.xlabel("Time (ps)")
+    plt.ylabel("Mean Squared Displacement (Å²)")
+    plt.title("Mean Squared Displacement vs Time")
+    plt.legend()
+    plt.savefig("quenching/msd_plot.png", dpi=300)
+    plt.show()
+    pd.DataFrame({"time_ps": times, "msd_A2": msd_values}).to_csv(
+        "quenching/msd_data.csv", index=False
+    )
+
+    df = pd.read_csv("quenching/msd_data.csv")
     times = df["time_ps"].values
     msd_values = df["msd_A2"].values
     print("Computing self-diffusion coefficient...")
@@ -80,5 +102,5 @@ if __name__ == "__main__":
     )
     plt.title("Mean Squared Displacement vs Time")
     plt.legend()
-    plt.savefig("msd_plot_loglog.png", dpi=300)
+    plt.savefig("quenching/msd_plot_loglog.png", dpi=300)
     plt.show()

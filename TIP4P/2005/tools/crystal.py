@@ -2,10 +2,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import gaussian_kde
-from sklearn.mixture import GaussianMixture
+from scipy.optimize import curve_fit
 
-nhb = pd.read_csv("rst/nhb_min_distances.csv").rename(columns={"min_distance": "nhb"})
-hb = pd.read_csv("rst/max_distance_per_idx.csv").rename(
+nhb = pd.read_csv("quenching/nhb_min_distances.csv").rename(columns={"min_distance": "nhb"})
+hb = pd.read_csv("quenching/max_distance_per_idx.csv").rename(
     columns={"max_distance": "hb", "idx": "O_idx"}
 )
 df = pd.merge(nhb, hb, on=["frame", "O_idx"], how="outer")
@@ -28,6 +28,7 @@ plt.axvline(0, color="k", linestyle="--")
 plt.legend()
 plt.xlabel("z (nm)")
 plt.title("KDE with different bandwidths")
+plt.savefig("quenching/kde_bandwidth_comparison.png", dpi=300)
 plt.show()
 
 # 2) Histogram sensitivity
@@ -37,30 +38,46 @@ for bins in [30, 60, 120]:
 plt.legend()
 plt.axvline(0, color="k", ls="--")
 plt.xlabel("z (nm)")
+plt.title("Histogram with different bin sizes")
+plt.savefig("quenching/histogram_bin_sensitivity.png", dpi=300)
 plt.show()
 
 # 3) GMM 两个高斯拟合（验证是否可用两高斯描述）
-z_reshape = zs.reshape(-1, 1)
-gmm = GaussianMixture(n_components=2, covariance_type="full", random_state=0).fit(z_reshape)
-weights = gmm.weights_
-means = gmm.means_.flatten()
-covs = gmm.covariances_.flatten()
-print("GMM components:", weights, means, np.sqrt(covs))
-# plot GMM components + data KDE
-x = np.linspace(zs.min(), zs.max(), 1000)
-pdf_gmm = np.exp(gmm.score_samples(x.reshape(-1, 1)))
+
+
+def two_gaussians(x, w1, mu1, sigma1, mu2, sigma2):
+    w2 = 1 - w1
+    return w1 * np.exp(-0.5 * ((x - mu1) / sigma1) ** 2) / (
+        sigma1 * np.sqrt(2 * np.pi)
+    ) + w2 * np.exp(-0.5 * ((x - mu2) / sigma2) ** 2) / (sigma2 * np.sqrt(2 * np.pi))
+
+
+# initial guess
+p0 = [0.5, -0.01, 0.005, 0.01, 0.005]
+hist, bin_edges = np.histogram(zs, bins=100, density=True)
+bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+params, cov = curve_fit(two_gaussians, bin_centers, hist, p0=p0)
+w1, mu1, sigma1, mu2, sigma2 = params
+print(
+    f"Fitted parameters:\nw1={w1:.3f}, mu1={mu1:.3f}, sigma1={sigma1:.3f}\nmu2={mu2:.3f}, sigma2={sigma2:.3f}"
+)
+# plot fit
 plt.figure(figsize=(8, 5))
-plt.hist(zs, bins=100, density=True, alpha=0.3)
-plt.plot(x, pdf_gmm, "-k", lw=2, label="GMM mixture")
+plt.hist(zs, bins=100, density=True, alpha=0.3, label="Data histogram")
+x_fit = np.linspace(zs.min(), zs.max(), 1000)
+plt.plot(x_fit, two_gaussians(x_fit, *params), "-k", lw=2, label="Two-Gaussian Fit")
 # individual gaussians
 from scipy.stats import norm
 
-for w, m, cv in zip(weights, means, covs):
-    plt.plot(x, w * norm.pdf(x, m, np.sqrt(cv)), "--", label=f"comp m={m:.3f}")
+plt.plot(x_fit, w1 * norm.pdf(x_fit, mu1, sigma1), "--", label=f"Comp 1 (mu={mu1:.3f})")
+plt.plot(x_fit, (1 - w1) * norm.pdf(x_fit, mu2, sigma2), "--", label=f"Comp 2 (mu={mu2:.3f})")
 plt.axvline(0, color="k", ls="--")
 plt.legend()
 plt.xlabel("z (nm)")
+plt.title("Two-Gaussian Fit to Histogram")
+plt.savefig("quenching/two_gaussian_fit.png", dpi=300)
 plt.show()
+
 
 # 4) 分时间段检查（例如每 20 ns 一段，假设 frame -> time map available）
 # 如果没有时间列，可用 frame index and dt to map to ns.
