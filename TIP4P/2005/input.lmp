@@ -1,0 +1,86 @@
+units real
+atom_style full
+boundary p p p
+
+package intel 1 omp 2
+
+read_data 1H2O
+replicate 8 8 8
+
+pair_style lj/cut/tip4p/long 1 2 1 1 0.1546 9.5
+kspace_style pppm/tip4p 1.0e-5
+
+bond_style zero
+angle_style zero
+
+pair_coeff 1 1 0.18521 3.1589 #O-O
+pair_coeff * 2 0.0 0.0 #O-H/H-H
+pair_modify tail yes
+
+bond_coeff 1 0.9572 #O-H
+angle_coeff 1 104.52 #H-O-H
+
+group gH2O type 1 2
+group gO type 1
+
+neighbor 3.0 bin
+neigh_modify delay 0 every 1 check yes
+
+timestep 2.0
+
+variable massAll equal mass(all)/6.022e23
+variable volCm3 equal vol*1.0e-24
+variable density_sys equal v_massAll/v_volCm3
+variable tmp equal temp
+
+
+thermo 1000
+thermo_style custom step temp vol etotal pe lx v_density_sys 
+thermo_modify flush yes
+
+velocity all create 300.0 12345 dist gaussian
+fix 1 gH2O shake 1.0e-4 100 0 b 1 a 1
+
+# minimize 1.0e-4 1.0e-6 1000 10000
+
+fix fnpt all npt temp 300.0 300.0 100.0 iso 0.9869 0.9869 1000.0
+run 50000 # 100ps
+unfix fnpt
+
+fix fnpt all npt temp 280.0 280.0 100.0 iso 0.9869 0.9869 1000.0
+run 100000 # 200ps
+unfix fnpt
+
+fix fnpt all npt temp 270.0 270.0 100.0 iso 0.9869 0.9869 1000.0
+run 150000 # 300ps
+unfix fnpt
+write_data data_270.data pair ij
+
+fix fnpt all npt temp 260.0 260.0 100.0 iso 0.9869 0.9869 1000.0
+run 250000 # 500ps
+unfix fnpt
+write_data data_260.data pair ij
+
+fix fnpt all npt temp 255.0 255.0 100.0 iso 0.9869 0.9869 1000.0
+run 500000 # 1ns
+unfix fnpt
+
+fix fnpt all npt temp 250.0 250.0 100.0 iso 0.9869 0.9869 1000.0
+run 1000000 # 2ns
+unfix fnpt
+write_data data_250.data pair ij
+
+fix fnpt all npt temp ${T} ${T} 100.0 iso 0.9869 0.9869 1000.0
+run 5000000 # 10ns
+
+# dump dH2O gH2O custom 1 dump_H2O_${T}.lammpstrj id type xu yu zu # 间隔2fs采样
+# dump_modify dH2O sort id
+# run 1000 # 2ps
+# # run 500000 # 1ns
+# undump dH2O
+
+dump dH2O gH2O custom 10 dump_H2O_${T}_10.lammpstrj id type xu yu zu # 间隔20fs采样
+dump_modify dH2O sort id
+run 500000 # 1ns
+undump dH2O
+write_data test_${T}.data pair ij

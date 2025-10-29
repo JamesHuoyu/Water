@@ -1,0 +1,49 @@
+units real
+atom_style full
+boundary p p p
+
+package intel 1 omp 2
+
+pair_style lj/cut/tip4p/long 1 2 1 1 0.1546 9.5
+bond_style zero
+angle_style zero
+pair_modify tail yes
+
+read_data test_${T}.data
+print "Initial configuration loaded from NPT run"
+
+variable Lx equal ${Lx_avg}
+variable Ly equal ${Ly_avg}
+variable Lz equal ${Lz_avg}
+
+print "Mapping to fixed box dimensions: ${Lx} ${Ly} ${Lz}"
+
+change_box all x final 0 ${Lx} y final 0 ${Ly} z final 0 ${Lz}
+change_box all remap
+
+reset_timestep 0
+kspace_style pppm/tip4p 1.0e-5
+pair_coeff 1 1 0.18521 3.1589
+pair_coeff * 2 0.0 0.0
+bond_coeff 1 0.9572
+angle_coeff 1 104.52
+
+group gH2O type 1 2
+group gO type 1
+
+neighbor 3.0 bin
+neigh_modify delay 0 every 1 check yes
+
+timestep 2.0
+fix 1 gH2O shake 1.0e-4 100 0 b 1 a 1
+
+fix fnvt all nvt temp ${T} ${T} 100.0
+
+thermo 1000
+thermo_style custom step temp press vol density etotal pe
+
+run 2000000    # 4ns
+
+
+write_data equilibration_NVT_${T}.data pair ij
+print "Wrote fixed-volume NVT equilibration data file"

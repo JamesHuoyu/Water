@@ -13,3 +13,4 @@ log.*
 tmp.*
 *.zip
 *.tar.gz
+*.h5
