@@ -4,36 +4,36 @@ import MDAnalysis as mda
 from MDAnalysis.analysis.hydrogenbonds.hbond_analysis import HydrogenBondAnalysis as HBA
 from collections import defaultdict
 
-# txt_file = "/home/debian/water/TIP4P/2005/2020/4096/stress_2.5e-5_246.data"
-# step, strain, stress = np.loadtxt(txt_file, comments="#", unpack=True)
-# strain_rate = (strain[1] - strain[0]) * 1e15 / (step[1] - step[0])  # in fs⁻¹
-# viscosity = stress * 1e9 / strain_rate  # in Pa·s
-# plt.figure(figsize=(8, 6))
-# plt.plot(step, viscosity, "b-", linewidth=1.5)
-# plt.xlabel("Time Step")
-# plt.ylabel("Viscosity (Pa·s)")
-# plt.title(f"Viscosity Evolution at T=246K, Strain Rate: {strain_rate:.2e} fs⁻¹")
-# plt.grid(True, linestyle="--", alpha=0.7)
-# window_size = max(100, int(len(viscosity) * 0.01))
-# # viscosity = np.convolve(viscosity, np.ones(window_size) / window_size, mode="valid")
-# start_idx = int(len(viscosity) * 0.3)
-# end_idx = int(len(viscosity) * 0.75)
-# average_viscosity = np.mean(viscosity[start_idx:end_idx])
-# rms_viscosity = np.std(viscosity[start_idx:end_idx])
-# plt.axhline(
-#     y=average_viscosity, color="r", linestyle="--", label=f"Avg: {average_viscosity:.4f} Pa·s"
-# )
-# plt.fill_between(
-#     step,
-#     average_viscosity - rms_viscosity,
-#     average_viscosity + rms_viscosity,
-#     color="r",
-#     alpha=0.2,
-# )
-# plt.legend(loc="best")
-# print(f"{txt_file}: Average viscosity: {average_viscosity:.5f} ± {rms_viscosity:.5f} Pa·s")
-# # plt.savefig("viscosity_246K_2.5e-5_4096.png", dpi=300)
-# plt.show()
+txt_file = "/home/debian/water/TIP4P/2005/nvt/shear/stress_5e-5_225.0.data"
+step, strain, stress = np.loadtxt(txt_file, comments="#", unpack=True)
+strain_rate = (strain[1] - strain[0]) * 1e15 / (step[1] - step[0])  # in fs⁻¹
+viscosity = stress * 1e9 / strain_rate  # in Pa·s
+plt.figure(figsize=(8, 6))
+plt.plot(step, viscosity, "b-", linewidth=1.5)
+plt.xlabel("Time Step")
+plt.ylabel("Viscosity (Pa·s)")
+plt.title(f"Viscosity Evolution at T=246K, Strain Rate: {strain_rate:.2e} fs⁻¹")
+plt.grid(True, linestyle="--", alpha=0.7)
+window_size = max(100, int(len(viscosity) * 0.01))
+# viscosity = np.convolve(viscosity, np.ones(window_size) / window_size, mode="valid")
+start_idx = int(len(viscosity) * 0.3)
+end_idx = int(len(viscosity) * 0.75)
+average_viscosity = np.mean(viscosity[start_idx:end_idx])
+rms_viscosity = np.std(viscosity[start_idx:end_idx])
+plt.axhline(
+    y=average_viscosity, color="r", linestyle="--", label=f"Avg: {average_viscosity:.4f} Pa·s"
+)
+plt.fill_between(
+    step,
+    average_viscosity - rms_viscosity,
+    average_viscosity + rms_viscosity,
+    color="r",
+    alpha=0.2,
+)
+plt.legend(loc="best")
+print(f"{txt_file}: Average viscosity: {average_viscosity:.5f} ± {rms_viscosity:.5f} Pa·s")
+# plt.savefig("viscosity_246K_2.5e-5_4096.png", dpi=300)
+plt.show()
 
 # u = mda.Universe(
 #     "/home/debian/water/TIP4P/2005/2020/4096/traj_2.5e-5_246.lammpstrj", format="LAMMPSDUMP"
@@ -123,57 +123,165 @@ from collections import defaultdict
 # plt.show()
 
 
-txt_list = [
-    "/home/debian/water/TIP4P/2005/2020/4096/multi/stress_5e-7_246.data",
-    "/home/debian/water/TIP4P/2005/2020/4096/multi/stress_2.5e-6_246.data",
-    "/home/debian/water/TIP4P/2005/2020/4096/multi/stress_5e-6_246.data",
-    "/home/debian/water/TIP4P/2005/2020/4096/stress_2.5e-5_246.data",
-    "/home/debian/water/TIP4P/2005/2020/4096/multi/stress_2.5e-4_246.data",
-]
-# txt_file = "/home/debian/water/TIP4P/2005/stress_5.0e-5_246.data"
-viscoisties = []
-strain_rates = []
-for txt_file in txt_list:
-    step, strain, stress = np.loadtxt(txt_file, comments="#", unpack=True)
-    strain_rate = (strain[1] - strain[0]) * 1e15 / (step[1] - step[0])  # in fs⁻¹
-    viscosity = stress * 1e9 / strain_rate  # in Pa·s
-    plt.figure(figsize=(8, 6))
-    plt.plot(step, viscosity, "b-", linewidth=1.5)
-    plt.xlabel("Time Step")
-    plt.ylabel("Viscosity (Pa·s)")
-    plt.title(f"Viscosity Evolution at T=246K, Strain Rate: {strain_rate*1e-15:.2e} fs⁻¹")
-    plt.grid(True, linestyle="--", alpha=0.7)
-    # half_idx = len(viscosity) // 3
-    window_size = max(100, int(len(viscosity) * 0.01))
-    viscosity = np.convolve(viscosity, np.ones(window_size) / window_size, mode="valid")
-    start_idx = int(len(viscosity) * 0.3)
-    average_viscosity = np.mean(viscosity[start_idx:])
-    rms_viscosity = np.std(viscosity[start_idx:])
-    plt.axhline(
-        y=average_viscosity, color="r", linestyle="--", label=f"Avg: {average_viscosity:.4f} Pa·s"
-    )
-    plt.fill_between(
-        step,
-        average_viscosity - rms_viscosity,
-        average_viscosity + rms_viscosity,
-        color="r",
-        alpha=0.2,
-    )
-    plt.legend(loc="best")
-    print(f"{txt_file}: Average viscosity: {average_viscosity:.5f} ± {rms_viscosity:.5f} Pa·s")
-    # plt.savefig("viscosity_246K_2.5e-5.png", dpi=300)
-    plt.show()
-    viscoisties.append((average_viscosity, rms_viscosity))
-    strain_rates.append(strain_rate)
-plt.figure(figsize=(8, 6))
-plt.errorbar(
-    strain_rates, [v[0] for v in viscoisties], yerr=[v[1] for v in viscoisties], fmt="o-", capsize=5
-)
-plt.xscale("log")
-plt.yscale("log")
-plt.xlabel("Strain Rate (fs⁻¹)")
-plt.ylabel("Average Viscosity (Pa·s)")
-plt.title("Viscosity vs Strain Rate at T=246K")
-plt.grid(True, linestyle="--", alpha=0.7)
-# plt.savefig("viscosity_vs_strain_rate_246K.png", dpi=300)
-plt.show()
+# txt_list = [
+#     # "/home/debian/water/TIP4P/2005/2020/4096/multi/stress_5e-7_246.data",
+#     # "/home/debian/water/TIP4P/2005/2020/4096/multi/stress_2.5e-6_246.data",
+#     # "/home/debian/water/TIP4P/2005/2020/4096/multi/stress_5e-6_246.data",
+#     "/home/debian/water/TIP4P/2005/2020/4096/multi/stress_1e-5_246.data",
+#     "/home/debian/water/TIP4P/2005/2020/4096/multi/stress_2.5e-5_246.data",
+#     "/home/debian/water/TIP4P/2005/2020/4096/multi/stress_7.5e-5_246.data",
+#     "/home/debian/water/TIP4P/2005/2020/4096/multi/stress_2.5e-4_246.data",
+# ]
+# # txt_file = "/home/debian/water/TIP4P/2005/stress_5.0e-5_246.data"
+# viscoisties = []
+# strain_rates = []
+# for txt_file in txt_list:
+#     step, strain, stress = np.loadtxt(txt_file, comments="#", unpack=True)
+#     strain_rate = (strain[1] - strain[0]) * 1e15 / (step[1] - step[0])  # in fs⁻¹
+#     viscosity = stress * 1e9 / strain_rate  # in Pa·s
+#     plt.figure(figsize=(8, 6))
+#     plt.plot(step, viscosity, "b-", linewidth=1.5)
+#     plt.xlabel("Time Step")
+#     plt.ylabel("Viscosity (Pa·s)")
+#     plt.title(f"Viscosity Evolution at T=246K, Strain Rate: {strain_rate*1e-15:.2e} fs⁻¹")
+#     plt.grid(True, linestyle="--", alpha=0.7)
+#     # half_idx = len(viscosity) // 3
+#     window_size = max(100, int(len(viscosity) * 0.01))
+#     viscosity = np.convolve(viscosity, np.ones(window_size) / window_size, mode="valid")
+#     start_idx = int(len(viscosity) * 0.3)
+#     average_viscosity = np.mean(viscosity[start_idx:])
+#     rms_viscosity = np.std(viscosity[start_idx:])
+#     plt.axhline(
+#         y=average_viscosity, color="r", linestyle="--", label=f"Avg: {average_viscosity:.4f} Pa·s"
+#     )
+#     plt.fill_between(
+#         step,
+#         average_viscosity - rms_viscosity,
+#         average_viscosity + rms_viscosity,
+#         color="r",
+#         alpha=0.2,
+#     )
+#     plt.legend(loc="best")
+#     print(f"{txt_file}: Average viscosity: {average_viscosity:.5f} ± {rms_viscosity:.5f} Pa·s")
+#     # plt.savefig("viscosity_246K_2.5e-5.png", dpi=300)
+#     plt.show()
+#     viscoisties.append((average_viscosity, rms_viscosity))
+#     strain_rates.append(strain_rate)
+# plt.figure(figsize=(8, 6))
+# plt.errorbar(
+#     strain_rates, [v[0] for v in viscoisties], yerr=[v[1] for v in viscoisties], fmt="o-", capsize=5
+# )
+# plt.xscale("log")
+# plt.yscale("log")
+# plt.xlabel("Strain Rate (fs⁻¹)")
+# plt.ylabel("Average Viscosity (Pa·s)")
+# plt.title("Viscosity vs Strain Rate at T=246K")
+# plt.grid(True, linestyle="--", alpha=0.7)
+# # plt.savefig(
+# #     "/home/debian/water/TIP4P/2005/2020/rst/4096/viscosity_vs_strain_rate_246K.png", dpi=300
+# # )
+# plt.show()
+
+# D = [3.12060e-02, 4.31303e-02, 5.79149e-02, 1.03411e-01, 2.47699e-01]
+# fraction = [0.473342, 0.511955, 0.544682, 0.612185, 0.714847]
+# tau_alpha = [5.28687, 1.12750, 0.86634, 0.58566, 0.37581]
+# tau_chi = [5.32, 2.4, 3.0, 1.6, 0.75]
+# tau_Q = [7, 5.80958, 4.04046, 2.07900, 0.98122]
+# gamma_rate = [1e-100, 1e-5, 2.5e-5, 7.5e-5, 2.5e-4]
+# plt.figure(figsize=(8, 6))
+# plt.plot(D, fraction, "o-", linewidth=1.5)
+# plt.xlabel("Diffusion Coefficient D (Å²/ps)")
+# plt.ylabel("HDL Fraction")
+# plt.title("HDL Fraction vs Diffusion Coefficient at T=246K")
+# plt.grid(True, linestyle="--", alpha=0.7)
+# # plt.savefig(
+# #     "/home/debian/water/TIP4P/2005/2020/rst/4096/hdl_fraction_vs_diffusion_coefficient_246K.png",
+# #     dpi=300,
+# # )
+# plt.show()
+# plt.figure(figsize=(8, 6))
+# plt.plot(tau_alpha, fraction, "s--", linewidth=1.5)
+# plt.plot(tau_Q, fraction, "d-.", linewidth=1.5)
+# plt.xlabel(r"$\tau$ (ps)")
+# plt.ylabel("HDL Fraction")
+# plt.title("HDL Fraction vs Relaxation Time at T=246K")
+# plt.legend([r"$\tau_{\alpha}$", r"$\tau_{Q}$"])
+# plt.grid(True, linestyle="--", alpha=0.7)
+# # plt.savefig(
+# #     "/home/debian/water/TIP4P/2005/2020/rst/4096/hdl_fraction_vs_tau_246K.png", dpi=300
+# # )
+# plt.show()
+# plt.figure(figsize=(8, 6))
+# plt.plot(gamma_rate, fraction, "o-", linewidth=1.5)
+# plt.axhline(y=0.5, color="r", linestyle="--", label="HDL Fraction = 0.5")
+# plt.xscale("log")
+# plt.xlabel("Strain Rate (fs⁻¹)")
+# plt.ylabel("HDL Fraction")
+# plt.ylim(0, 1)
+# plt.title("HDL Fraction vs Strain Rate at T=246K")
+# plt.grid(True, linestyle="--", alpha=0.7)
+# plt.savefig(
+#     "/home/debian/water/TIP4P/2005/2020/rst/4096/hdl_fraction_vs_strain_rate_246K.png", dpi=300
+# )
+# plt.show()
+# plt.figure(figsize=(8, 6))
+# plt.plot(gamma_rate, D, "o-", linewidth=1.5)
+# plt.xscale("log")
+# plt.yscale("log")
+# plt.xlabel("Strain Rate (fs⁻¹)")
+# plt.ylabel("Diffusion Coefficient D (Å²/ps)")
+# plt.title("Diffusion Coefficient vs Strain Rate at T=246K")
+# plt.grid(True, linestyle="--", alpha=0.7)
+# plt.savefig(
+#     "/home/debian/water/TIP4P/2005/2020/rst/4096/diffusion_coefficient_vs_strain_rate_246K.png",
+#     dpi=300,
+# )
+# plt.show()
+# plt.figure(figsize=(8, 6))
+# plt.plot(gamma_rate, tau_alpha, "o-", linewidth=1.5, label=r"$\tau_{\alpha}$")
+# plt.plot(gamma_rate, tau_chi, "s--", linewidth=1.5, label=r"$\tau_{\chi}$")
+# plt.plot(gamma_rate, tau_Q, "d-.", linewidth=1.5, label=r"$\tau_{Q}$")
+# plt.legend()
+# plt.xscale("log")
+# # plt.yscale("log")
+# plt.xlabel("Strain Rate (fs⁻¹)")
+# plt.ylabel(r"$\tau$ (ps)")
+# plt.title(r"$\tau$ vs Strain Rate at T=246K")
+# plt.grid(True, linestyle="--", alpha=0.7)
+# # plt.savefig(
+# #     "/home/debian/water/TIP4P/2005/2020/rst/4096/tau_alpha_vs_strain_rate_246K.png", dpi=300
+# # )
+# plt.show()
+# # 绘制τ比例关系
+# plt.figure(figsize=(8, 6))
+# plt.plot(
+#     gamma_rate,
+#     np.array(tau_chi) / np.array(tau_alpha),
+#     "o-",
+#     linewidth=1.5,
+#     label=r"$\tau_{\chi} / \tau_{\alpha}$",
+# )
+# plt.plot(
+#     gamma_rate,
+#     np.array(tau_Q) / np.array(tau_alpha),
+#     "d-.",
+#     linewidth=1.5,
+#     label=r"$\tau_{Q} / \tau_{\alpha}$",
+# )
+# plt.plot(
+#     gamma_rate,
+#     np.array(tau_Q) / np.array(tau_chi),
+#     "s--",
+#     linewidth=1.5,
+#     label=r"$\tau_{Q} / \tau_{\chi}$",
+# )
+# plt.xscale("log")
+# plt.xlabel("Strain Rate (fs⁻¹)")
+# plt.ylabel(r"$\tau_{\chi} / \tau_{\alpha}$")
+# plt.title(r"$\tau_{\chi} / \tau_{\alpha}$ vs Strain Rate at T=246K")
+# plt.grid(True, linestyle="--", alpha=0.7)
+# plt.legend()
+# # plt.savefig(
+# #     "/home/debian/water/TIP4P/2005/2020/rst/4096/tau_chi_over_tau_alpha_vs_strain_rate_246K.png", dpi=300
+# # )
+# plt.show()

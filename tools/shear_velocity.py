@@ -6,6 +6,7 @@ from numba import jit, prange
 import numpy as np
 
 
+# 2.5e-5,7.5e-5 是正常的，1e-5有问题（5埃的地方为原点）
 class ShearVelocityAnalyzer:
     def __init__(self, universe: Universe, shear_rate: float = 0.0, time_step: float = 1.0):
         self.universe = universe
@@ -19,8 +20,8 @@ class ShearVelocityAnalyzer:
         self.velocities = np.zeros((self.n_frames, len(self.O_atoms), 3))
         for ts in tqdm(self.universe.trajectory, desc="Loading velocity data"):
             self.velocities[ts.frame] = self.O_atoms.velocities.copy()
-        if shear_rate != 0.0:
-            self.shear_correction(shear_rate, time_step)
+        # if shear_rate != 0.0:
+        #     self.shear_correction(shear_rate, time_step)
 
     def shear_correction(self, shear_rate, time_step):
         for frame in tqdm(range(self.n_frames), desc="Applying shear correction"):
@@ -39,7 +40,7 @@ class ShearVelocityAnalyzer:
         print(f"Box height in y-direction: {height} Å")
         vx_all = self.velocities[frame:, :, 0].flatten()
         y_all = self.coords[frame:, :, 1].flatten()
-        y_bins = np.linspace(0, height, 50)
+        y_bins = np.linspace(0, height, 100)
         vx_profile = np.zeros(len(y_bins) - 1)
         for i in range(len(y_bins) - 1):
             mask = (y_all >= y_bins[i]) & (y_all < y_bins[i + 1])
@@ -53,7 +54,7 @@ class ShearVelocityAnalyzer:
 
 # 示例使用
 u = mda.Universe(
-    "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-4_246.lammpstrj", format="LAMMPSDUMP"
+    "/home/debian/water/TIP4P/2005/2020/4096/traj_2.5e-5_246.lammpstrj", format="LAMMPSDUMP"
 )
 analyzer = ShearVelocityAnalyzer(u)  # shear_rate in 1/ps
 y_positions, vx_profile = analyzer.plot_vx_profile()

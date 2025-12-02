@@ -1,401 +1,401 @@
+#!/usr/bin/env python3
+"""
+Memory-efficient hydrogen-bond analysis (rewritten)
+- Uses chunked HBA runs and appends hbonds to an HDF5 dataset (frames in ascending order)
+- Avoids loading entire HDF5 into memory by scanning with a cursor
+- Uses FastNS neighbor search to compute nearest non-HB distances (O(N·k) instead of O(N^2))
+- Streaming I/O for counts / outputs
+
+Usage:
+    python hb_analysis_memory_efficient_rewrite.py --dump_file traj.dump --out_dir output
+
+Requirements: MDAnalysis, h5py, numpy, matplotlib, tqdm
+"""
+
 import argparse
-import MDAnalysis as mda
-from MDAnalysis.analysis.hydrogenbonds.hbond_analysis import HydrogenBondAnalysis as HBA
-from MDAnalysis.lib.distances import apply_PBC, distance_array
-from MDAnalysis.lib.nsgrid import FastNS
-import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
-from tqdm import tqdm
 import os
 import gc
-from collections import defaultdict
+import numpy as np
 import h5py
+import MDAnalysis as mda
+from MDAnalysis.analysis.hydrogenbonds.hbond_analysis import HydrogenBondAnalysis as HBA
+from MDAnalysis.lib.nsgrid import FastNS
+from MDAnalysis.lib.distances import apply_PBC
+from collections import defaultdict
+from tqdm import tqdm
+import pandas as pd
+import matplotlib.pyplot as plt
 
 
-class MemoryEfficientHBAnalysis:
-    """内存优化的氢键分析类"""
+class HBMemoryEfficient:
+    """Rewritten, more memory-efficient and faster implementation."""
 
     def __init__(
-        self, dump_file, out_dir="output", chunk_size=100, start_frame=None, end_frame=None
+        self,
+        dump_file,
+        out_dir="output",
+        chunk_size=200,
+        start_frame=None,
+        end_frame=None,
+        mem_limit_bytes=None,
     ):
         self.dump_file = dump_file
         self.out_dir = out_dir
-        self.chunk_size = chunk_size
+        os.makedirs(out_dir, exist_ok=True)
+
+        self.chunk_size = int(chunk_size)
         self.u = mda.Universe(dump_file, format="LAMMPSDUMP")
         self.O_atoms = self.u.select_atoms("type 1")
         self.global_O_indices = self.O_atoms.indices
+        self.n_atoms = len(self.O_atoms)
         self.n_frames = len(self.u.trajectory)
 
-        self.start_frame = start_frame if start_frame is not None else 0
-        self.end_frame = end_frame if end_frame is not None else self.n_frames
+        self.start_frame = 0 if start_frame is None else int(start_frame)
+        self.end_frame = self.n_frames if end_frame is None else int(end_frame)
         if (
             self.start_frame < 0
             or self.end_frame > self.n_frames
             or self.start_frame >= self.end_frame
         ):
             raise ValueError("Invalid start_frame or end_frame")
-        # 确保输出目录存在
-        os.makedirs(out_dir, exist_ok=True)
 
-    def run_hb_analysis_chunked(self, OO_cutoff=3.5, angle_cutoff=30.0):
-        """分块进行氢键分析以降低内存使用"""
-        print("Running hydrogen bond analysis in chunks...")
+        # approximate memory limit (not strictly enforced, but used to pick chunk sizes)
+        self.mem_limit_bytes = mem_limit_bytes
 
-        # 初始化HDF5文件存储结果
-        hdf5_file = os.path.join(self.out_dir, "hbonds_temp.h5")
+    # ------------------ stage 1: compute and write hbonds to HDF5 (ascending frames) ------------------
+    def run_hb_analysis_chunked(self, OO_cutoff=3.5, angle_cutoff=30.0, hdf5_name="hbonds.h5"):
+        print("[1] Running hydrogen-bond analysis (chunked) ...")
+        hdf5_file = os.path.join(self.out_dir, hdf5_name)
+
+        # dtype: frame(int32), donor(int32), hydrogen(int32), acceptor(int32), distance(float32), angle(float32)
+        dtype = np.dtype(
+            [
+                ("frame", np.int32),
+                ("donor", np.int32),
+                ("hydrogen", np.int32),
+                ("acceptor", np.int32),
+                ("distance", np.float32),
+                ("angle", np.float32),
+            ]
+        )
 
         with h5py.File(hdf5_file, "w") as h5f:
-            # 创建可扩展的数据集
-            hbond_dataset = h5f.create_dataset(
-                "hbonds",
-                (0, 6),  # frame, donor_idx, hydrogen_idx, acceptor_idx, distance, angle
-                maxshape=(None, 6),
-                dtype=np.float64,
-                chunks=True,
-                compression="gzip",
+            ds = h5f.create_dataset(
+                "hbonds", shape=(0,), maxshape=(None,), dtype=dtype, chunks=True, compression="gzip"
             )
 
-            total_hbonds = 0
-
-            # 分块处理
-            for start_frame in tqdm(
-                range(self.start_frame, self.end_frame + 1, self.chunk_size),
-                desc="Processing chunks",
+            total = 0
+            # Process in chunks of frames; HBA returns hbonds with absolute frame numbers
+            for start in tqdm(
+                range(self.start_frame, self.end_frame, self.chunk_size), desc="HBA chunks"
             ):
-                end_frame = min(start_frame + self.chunk_size, self.end_frame + 1)
+                stop = min(start + self.chunk_size, self.end_frame)
 
-                # 对当前块进行氢键分析
-                hbond_analysis = HBA(
+                # Initialize HBA for this chunk and run
+                hba = HBA(
                     universe=self.u,
                     donors_sel="type 1",
                     hydrogens_sel="type 2",
                     acceptors_sel="type 1",
                     d_a_cutoff=OO_cutoff,
-                    d_h_a_angle_cutoff=180 - angle_cutoff,
+                    d_h_a_angle_cutoff=180.0 - angle_cutoff,
                 )
 
-                hbond_analysis.run(start=start_frame, stop=end_frame)
-                chunk_hbonds = hbond_analysis.results.hbonds
+                hba.run(start=start, stop=stop)
 
-                if len(chunk_hbonds) > 0:
-                    # 扩展数据集
-                    current_size = hbond_dataset.shape[0]
-                    new_size = current_size + len(chunk_hbonds)
-                    hbond_dataset.resize(new_size, axis=0)
+                chunk_hb = hba.results.hbonds
+                if chunk_hb is None:
+                    chunk_hb = np.empty((0, 6), dtype=np.float32)
 
-                    # 写入数据
-                    hbond_dataset[current_size:new_size] = chunk_hbonds
-                    total_hbonds += len(chunk_hbonds)
+                # chunk_hb shape (n,6): frame, donor, hydrogen, acceptor, distance, angle
+                if len(chunk_hb) > 0:
+                    # convert to structured array matching dtype
+                    rec = np.empty(len(chunk_hb), dtype=dtype)
+                    rec["frame"] = chunk_hb[:, 0].astype(np.int32)
+                    rec["donor"] = chunk_hb[:, 1].astype(np.int32)
+                    rec["hydrogen"] = chunk_hb[:, 2].astype(np.int32)
+                    rec["acceptor"] = chunk_hb[:, 3].astype(np.int32)
+                    rec["distance"] = chunk_hb[:, 4].astype(np.float32)
+                    rec["angle"] = chunk_hb[:, 5].astype(np.float32)
 
-                # 清理内存
-                del hbond_analysis, chunk_hbonds
+                    # append preserving ascending frame order because we processed frames ascending
+                    old = ds.shape[0]
+                    ds.resize(old + rec.shape[0], axis=0)
+                    ds[old : old + rec.shape[0]] = rec
+                    total += rec.shape[0]
+
+                # cleanup
+                del hba, chunk_hb
                 gc.collect()
 
-        print(f"Total hydrogen bonds found: {total_hbonds}")
+        print(f"H-bond write complete: {total} hbonds -> {hdf5_file}")
         return hdf5_file
 
-    def process_hbond_counts_streaming(self, hdf5_file):
-        """流式处理氢键计数以节省内存"""
-        print("Processing hydrogen bond counts...")
+    # ------------------ stage 2: streaming count (scan HDF5 once) ------------------
+    def process_hbond_counts_streaming(self, hdf5_file, csv_name="hb_counts_per_idx.csv"):
+        print("[2] Processing hydrogen bond counts (streaming) ...")
+        csv_file = os.path.join(self.out_dir, csv_name)
 
-        # 使用字典收集每帧的计数，避免大型DataFrame
-        frame_counts = defaultdict(lambda: defaultdict(int))
+        # We will scan the dataset in batch windows and produce CSV streaming writes.
+        with h5py.File(hdf5_file, "r") as h5f, open(csv_file, "w") as outf:
+            ds = h5f["hbonds"]
+            outf.write("frame,O_idx,hb_count\n")
 
-        with h5py.File(hdf5_file, "r") as h5f:
-            hbonds = h5f["hbonds"]
+            # accumulate counts per frame in a small dict then flush per frame
+            cursor = 0
+            N = ds.shape[0]
+            batch = 100000  # tuneable
 
-            # 分批读取数据
-            batch_size = 1000
-            for i in tqdm(range(0, hbonds.shape[0], batch_size), desc="Processing HB counts"):
-                batch_end = min(i + batch_size, hbonds.shape[0])
-                batch_data = hbonds[i:batch_end]
+            # We'll iterate frames from start_frame to end_frame-1 and build counts using cursor
+            for frame in tqdm(range(self.start_frame, self.end_frame), desc="frames for counts"):
+                counts = defaultdict(int)
 
-                for row in batch_data:
-                    frame, donor_idx, _, acceptor_idx, _, _ = row
-                    frame = int(frame)
-                    donor_idx = int(donor_idx)
-                    acceptor_idx = int(acceptor_idx)
+                # advance cursor to rows with this frame (dataset is in ascending frame order)
+                while cursor < N:
+                    row = ds[cursor]
+                    rf = int(row["frame"])
+                    if rf > frame:
+                        break
+                    if rf == frame:
+                        counts[int(row["donor"])] += 1
+                        counts[int(row["acceptor"])] += 1
+                    cursor += 1
 
-                    frame_counts[frame][donor_idx] += 1
-                    frame_counts[frame][acceptor_idx] += 1
+                # write counts for this frame
+                for idx, c in counts.items():
+                    outf.write(f"{frame},{idx},{c}\n")
 
-        # 将结果写入CSV（分批写入）
-        csv_file = os.path.join(self.out_dir, "hb_counts_per_idx.csv")
-        with open(csv_file, "w") as f:
-            f.write("frame,O_idx,hb_count\n")
-
-            for frame in sorted(frame_counts.keys()):
-                for o_idx in sorted(frame_counts[frame].keys()):
-                    count = frame_counts[frame][o_idx]
-                    f.write(f"{frame},{o_idx},{count}\n")
-
-        print(f"HB counts saved to {csv_file}")
+        print(f"HB counts streaming saved to {csv_file}")
         return csv_file
 
-    def calculate_distances_memory_efficient(self, hdf5_file):
-        """内存优化的距离计算"""
-        print("Calculating distances in memory-efficient manner...")
+    # ------------------ stage 3: compute distances frame-by-frame using FastNS and HDF5 cursor ------------------
+    def calculate_distances_memory_efficient(
+        self,
+        hdf5_file,
+        max_dist_name="max_distance_per_idx.csv",
+        nhb_dist_name="nhb_min_distances.csv",
+        neighbor_cutoff=6.0,
+    ):
+        """
+        For each trajectory frame, gather hb_pairs by scanning HDF5 with a cursor (dataset ordered by frame)
+        Use FastNS to find neighbors up to neighbor_cutoff and compute min non-hbond distances.
+        """
+        print("[3] Calculating distances (FastNS, streaming hbonds) ...")
 
-        # 预先读取氢键数据并按帧分组（使用生成器）
-        def get_frame_hbonds(hdf5_file):
-            """生成器：逐帧返回氢键数据"""
-            with h5py.File(hdf5_file, "r") as h5f:
-                hbonds = h5f["hbonds"][:]
+        max_dist_file = os.path.join(self.out_dir, max_dist_name)
+        nhb_dist_file = os.path.join(self.out_dir, nhb_dist_name)
 
-            # 按帧分组
-            frame_groups = defaultdict(list)
-            for row in hbonds:
-                frame = int(row[0])
-                frame_groups[frame].append(row)
+        with h5py.File(hdf5_file, "r") as h5f, open(max_dist_file, "w") as fmax, open(
+            nhb_dist_file, "w"
+        ) as fnhb:
 
-            return frame_groups
+            ds = h5f["hbonds"]
+            fmax.write("frame,idx,max_distance\n")
+            fnhb.write("frame,O_idx,min_distance\n")
 
-        frame_hbonds = get_frame_hbonds(hdf5_file)
+            # cursor across HDF5 dataset (it's important we processed hbonds in ascending frame order earlier)
+            cursor = 0
+            Nrows = ds.shape[0]
 
-        # 输出文件
-        max_dist_file = os.path.join(self.out_dir, "max_distance_per_idx.csv")
-        nhb_dist_file = os.path.join(self.out_dir, "nhb_min_distances.csv")
-
-        with open(max_dist_file, "w") as f1, open(nhb_dist_file, "w") as f2:
-            f1.write("frame,idx,max_distance\n")
-            f2.write("frame,O_idx,min_distance\n")
-
-            # 逐帧处理
+            # iterate trajectory frames directly from Universe (this loads one ts at a time)
             for ts in tqdm(
-                self.u.trajectory[self.start_frame : self.end_frame + 1], desc="Processing frames"
+                self.u.trajectory[self.start_frame : self.end_frame], desc="frames distance"
             ):
                 frame = ts.frame
-                coords_O = self.O_atoms.positions
-                box_dims = ts.dimensions
+                coords_O = self.O_atoms.positions.astype(np.float32)
+                box_dims = ts.dimensions.astype(np.float32)
 
-                # 应用PBC
-                coords_O = apply_PBC(coords_O, box_dims)
+                # gather hb_pairs for this frame (as global indices)
+                hb_pairs = set()
+                max_distances = defaultdict(float)
 
-                # 获取当前帧的氢键
-                current_hbonds = frame_hbonds.get(frame, [])
+                # advance cursor collecting rows for `frame` (dataset ordered ascending by frame)
+                while cursor < Nrows:
+                    row = ds[cursor]
+                    rf = int(row["frame"])
+                    if rf < frame:
+                        cursor += 1
+                        continue
+                    if rf > frame:
+                        break
 
-                if len(current_hbonds) > 0:
-                    # 计算最大氢键距离（更高效的方法）
-                    max_distances = defaultdict(float)
-                    hb_pairs = set()
+                    donor = int(row["donor"])
+                    acceptor = int(row["acceptor"])
+                    dist = float(row["distance"])
 
-                    for hb in current_hbonds:
-                        _, donor_idx, _, acceptor_idx, distance, _ = hb
-                        donor_idx = int(donor_idx)
-                        acceptor_idx = int(acceptor_idx)
+                    # store as global indices (dataset used original indices from Universe)
+                    hb_pairs.add((donor, acceptor))
+                    hb_pairs.add((acceptor, donor))
 
-                        max_distances[donor_idx] = max(max_distances[donor_idx], distance)
-                        max_distances[acceptor_idx] = max(max_distances[acceptor_idx], distance)
-                        hb_pairs.add((donor_idx, acceptor_idx))
+                    # track per-atom max hb distance
+                    max_distances[donor] = max(max_distances.get(donor, 0.0), dist)
+                    max_distances[acceptor] = max(max_distances.get(acceptor, 0.0), dist)
 
-                    # 写入最大距离
-                    for idx, max_dist in max_distances.items():
-                        f1.write(f"{frame},{idx},{max_dist}\n")
+                    cursor += 1
 
-                # 计算非氢键最短距离（优化算法）
-                min_non_hb_distances = self._calculate_min_non_hb_distances_optimized(
-                    coords_O, box_dims, hb_pairs
-                )
+                # write max distances out (convert to consistent units if desired; here we keep raw)
+                for idx, md in max_distances.items():
+                    fmax.write(f"{frame},{idx},{md}\n")
 
-                # 写入非氢键最短距离
-                for i, min_dist in enumerate(min_non_hb_distances):
-                    if min_dist < np.inf:
-                        global_idx = self.global_O_indices[i]
-                        f2.write(f"{frame},{global_idx},{min_dist}\n")
+                # compute min non-hbond distances using FastNS neighbor search
+                if self.n_atoms == 0:
+                    continue
 
-                # 定期清理内存
+                ns = FastNS(neighbor_cutoff, coords_O, box=box_dims)
+                res = ns.self_search()
+                pairs = res.get_pairs()  # (i, j) local indices; i < j normally
+                pair_distances = res.get_pair_distances()
+
+                # initialize min distances with very large value
+                min_distances = np.full(self.n_atoms, np.finfo(np.float32).max, dtype=np.float32)
+
+                # iterate neighbor pairs
+                for (i, j), d in zip(pairs, pair_distances):
+
+                    gi = int(self.global_O_indices[i])
+                    gj = int(self.global_O_indices[j])
+
+                    # skip if hb pair
+                    if (gi, gj) in hb_pairs:
+                        continue
+
+                    # update local minima
+                    if d < min_distances[i]:
+                        min_distances[i] = d
+                    if d < min_distances[j]:
+                        min_distances[j] = d
+
+                # write non-hbond minima
+                for local_i, val in enumerate(min_distances):
+                    if val < np.finfo(np.float32).max:
+                        global_idx = int(self.global_O_indices[local_i])
+                        fnhb.write(f"{frame},{global_idx},{val}\n")
+
+                # periodic cleanup
                 if frame % 100 == 0:
                     gc.collect()
 
-        print(f"Distance calculations completed")
+        print("Distance calculations complete")
         return max_dist_file, nhb_dist_file
 
-    def _calculate_min_non_hb_distances_optimized(self, coords_O, box_dims, hb_pairs):
-        """优化的非氢键最短距离计算"""
-        n_atoms = len(coords_O)
-        min_distances = np.full(n_atoms, np.inf)
+    # ------------------ stage 4: compute zeta streaming ------------------
+    def calculate_zeta_streaming(self, max_dist_file, nhb_dist_file, zeta_name="zeta.csv"):
+        print("[4] Calculating zeta (streaming) ...")
+        zeta_file = os.path.join(self.out_dir, zeta_name)
 
-        # 使用分块距离计算避免内存爆炸
-        chunk_size = min(500, n_atoms)  # 根据可用内存调整
-
-        for i in range(0, n_atoms, chunk_size):
-            i_end = min(i + chunk_size, n_atoms)
-            coords_i = coords_O[i:i_end]
-
-            # 计算距离矩阵（只计算一个块与所有原子的距离）
-            dist_matrix = distance_array(coords_i, coords_O, box=box_dims)
-
-            for local_i, global_i in enumerate(range(i, i_end)):
-                global_i_idx = self.global_O_indices[global_i]
-
-                for global_j in range(n_atoms):
-                    if global_i == global_j:
-                        continue
-
-                    global_j_idx = self.global_O_indices[global_j]
-                    distance = dist_matrix[local_i, global_j]
-
-                    # 检查是否为氢键对
-                    if (global_i_idx, global_j_idx) not in hb_pairs and (
-                        global_j_idx,
-                        global_i_idx,
-                    ) not in hb_pairs:
-                        min_distances[global_i] = min(min_distances[global_i], distance)
-
-        return min_distances
-
-    def calculate_zeta_streaming(self, max_dist_file, nhb_dist_file):
-        """流式计算zeta值"""
-        print("Calculating zeta values...")
-
-        # 读取数据并计算zeta（逐行处理）
-        zeta_file = os.path.join(self.out_dir, "zeta.csv")
-
-        # 首先收集所有的max_distance数据到字典
-        max_distances = {}
+        # load max distances into a dict keyed by (frame, idx) - this can be large but usually smaller than hbonds
+        maxd = {}
         with open(max_dist_file, "r") as f:
-            next(f)  # 跳过header
+            next(f)
             for line in f:
-                frame, idx, max_dist = line.strip().split(",")
-                max_distances[(int(frame), int(idx))] = float(max_dist) * 0.1  # 转换单位
+                frame, idx, md = line.strip().split(",")
+                maxd[(int(frame), int(idx))] = float(md)
 
-        # 处理nhb_distances并计算zeta
-        with open(nhb_dist_file, "r") as f_in, open(zeta_file, "w") as f_out:
-            f_out.write("frame,O_idx,distance\n")
-            next(f_in)  # 跳过header
+        with open(nhb_dist_file, "r") as fin, open(zeta_file, "w") as fout:
+            fout.write("frame,O_idx,zeta\n")
+            next(fin)
+            for line in fin:
+                frame, oidx, mind = line.strip().split(",")
+                key = (int(frame), int(oidx))
+                md = maxd.get(key, 0.0)
+                zeta = float(mind) - float(md)
+                fout.write(f"{frame},{oidx},{zeta}\n")
 
-            for line in f_in:
-                frame, o_idx, min_dist = line.strip().split(",")
-                frame, o_idx = int(frame), int(o_idx)
-                min_dist = float(min_dist) * 0.1  # 转换单位
-
-                # 查找对应的max_distance
-                max_dist = max_distances.get((frame, o_idx), 0.0)
-
-                # 计算zeta
-                zeta = min_dist - max_dist
-                f_out.write(f"{frame},{o_idx},{zeta}\n")
-
-        print(f"Zeta values saved to {zeta_file}")
+        print(f"Zeta saved to {zeta_file}")
         return zeta_file
 
-    def run_complete_analysis(self, OO_cutoff=3.5, angle_cutoff=30.0):
-        """运行完整的内存优化分析"""
-        print("Starting memory-efficient hydrogen bond analysis...")
-        print(f"Analyzing frames {self.start_frame} to {self.end_frame}...")
-
-        # 1. 氢键分析
-        hdf5_file = self.run_hb_analysis_chunked(OO_cutoff, angle_cutoff)
-
-        # 2. 处理氢键计数
-        hb_counts_file = self.process_hbond_counts_streaming(hdf5_file)
-
-        # 3. 计算距离
-        max_dist_file, nhb_dist_file = self.calculate_distances_memory_efficient(hdf5_file)
-
-        # 4. 计算zeta值
-        zeta_file = self.calculate_zeta_streaming(max_dist_file, nhb_dist_file)
-
-        # 5. 生成分布图
-        self.plot_hb_distribution(hb_counts_file)
-
-        # 6. 清理临时文件
-        if os.path.exists(hdf5_file):
-            os.remove(hdf5_file)
-
-        print("Analysis completed!")
-        return {
-            "hb_counts": hb_counts_file,
-            "max_distances": max_dist_file,
-            "nhb_distances": nhb_dist_file,
-            "zeta": zeta_file,
-        }
-
+    # ------------------ plotting (unchanged streaming-friendly) ------------------
     def plot_hb_distribution(self, hb_counts_file):
-        """绘制氢键分布图（内存高效版本）"""
-        print("Plotting hydrogen bond distribution...")
-
-        # 流式读取数据以计算分布
+        print("[5] Plotting distributions ...")
         hb_counts = []
-        chunk_size = 1000
-
         with open(hb_counts_file, "r") as f:
-            next(f)  # 跳过header
-            chunk = []
-
+            next(f)
             for line in f:
-                _, _, count = line.strip().split(",")
-                chunk.append(int(count))
+                _, _, c = line.strip().split(",")
+                hb_counts.append(int(c))
 
-                if len(chunk) >= chunk_size:
-                    hb_counts.extend(chunk)
-                    chunk = []
+        if len(hb_counts) == 0:
+            print("No hb count data to plot")
+            return
 
-            if chunk:  # 处理最后一块
-                hb_counts.extend(chunk)
-
-        # 绘制直方图
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(8, 5))
         plt.hist(
-            hb_counts,
-            bins=range(0, max(hb_counts) + 2),
-            density=True,
-            alpha=0.7,
-            align="left",
-            rwidth=0.8,
+            hb_counts, bins=range(0, max(hb_counts) + 2), density=True, align="left", rwidth=0.8
         )
         plt.xlabel("Number of Hydrogen Bonds per Oxygen")
         plt.ylabel("Probability Density")
         plt.title("Distribution of Hydrogen Bonds per Oxygen")
-        plt.grid(True, alpha=0.3)
+        plt.grid(alpha=0.3)
+        plt.text(
+            0.95,
+            0.95,
+            f"Average: {np.mean(hb_counts):.2f}",
+            transform=plt.gca().transAxes,
+            ha="right",
+            va="top",
+        )
+        plt.savefig(
+            os.path.join(self.out_dir, "hb_count_distribution.png"), dpi=300, bbox_inches="tight"
+        )
+        plt.close()
 
-        plot_file = os.path.join(self.out_dir, "hb_count_distribution.png")
-        plt.savefig(plot_file, dpi=300, bbox_inches="tight")
-        plt.show()
+    # ------------------ orchestrator ------------------
+    def run_complete(self, OO_cutoff=3.5, angle_cutoff=30.0, neighbor_cutoff=6.0):
+        hb_h5 = self.run_hb_analysis_chunked(
+            OO_cutoff=OO_cutoff, angle_cutoff=angle_cutoff, hdf5_name="hbonds.h5"
+        )
+        counts_csv = self.process_hbond_counts_streaming(hb_h5)
+        max_csv, nhb_csv = self.calculate_distances_memory_efficient(
+            hb_h5, neighbor_cutoff=neighbor_cutoff
+        )
+        zeta_csv = self.calculate_zeta_streaming(max_csv, nhb_csv)
+        self.plot_hb_distribution(counts_csv)
 
-        print(f"Distribution plot saved to {plot_file}")
+        # optionally remove hb hdf5 to save space
+        # try:
+        #     os.remove(hb_h5)
+        # except Exception:
+        #     pass
+
+        return {
+            "hb_counts": counts_csv,
+            "max_distances": max_csv,
+            "nhb_distances": nhb_csv,
+            "zeta": zeta_csv,
+        }
 
 
-def run_memory_efficient_analysis(dump_file, out_dir):
-    """主函数：运行内存优化的分析"""
-
-    start_frame = 3500
-    # 检查文件是否存在
-    if not os.path.exists(dump_file):
-        print(f"Trajectory file not found: {dump_file}")
-        print("Please update the file path.")
-        return
-
-    # 创建分析器实例
-    analyzer = MemoryEfficientHBAnalysis(
-        dump_file=dump_file, out_dir=out_dir, chunk_size=50, start_frame=start_frame
+# ------------------ CLI ------------------
+def main():
+    parser = argparse.ArgumentParser(
+        description="Memory-efficient hydrogen bond analysis (rewritten)"
+    )
+    parser.add_argument("--dump_file", required=True)
+    parser.add_argument("--out_dir", default="output")
+    parser.add_argument("--chunk_size", type=int, default=200)
+    parser.add_argument("--start_frame", type=int, default=None)
+    parser.add_argument("--end_frame", type=int, default=None)
+    parser.add_argument(
+        "--neighbor_cutoff", type=float, default=6.0, help="FastNS neighbor cutoff in angstrom"
     )
 
-    # 运行完整分析
-    results = analyzer.run_complete_analysis(OO_cutoff=3.5, angle_cutoff=30.0)
+    args = parser.parse_args()
 
-    print("Files generated:")
-    for key, filepath in results.items():
-        print(f"  {key}: {filepath}")
+    analyzer = HBMemoryEfficient(
+        dump_file=args.dump_file,
+        out_dir=args.out_dir,
+        chunk_size=args.chunk_size,
+        start_frame=args.start_frame,
+        end_frame=args.end_frame,
+    )
+
+    results = analyzer.run_complete(
+        OO_cutoff=3.5, angle_cutoff=30.0, neighbor_cutoff=args.neighbor_cutoff
+    )
+    print("Results:")
+    for k, v in results.items():
+        print(f"  {k}: {v}")
 
 
 if __name__ == "__main__":
-    # 设置内存使用限制（可选）
-    import resource
-
-    parser = argparse.ArgumentParser(description="Memory Efficient Hydrogen Bond Analysis")
-    parser.add_argument(
-        "--dump_file", type=str, required=False, help="Path to the LAMMPS dump file"
-    )
-    parser.add_argument("--out_dir", type=str, default="output", help="Output directory")
-
-    args = parser.parse_args()
-    # 限制内存使用（以字节为单位，这里设置为6GB）
-    try:
-        resource.setrlimit(resource.RLIMIT_AS, (6 * 1024**3, 6 * 1024**3))
-    except:
-        print("Warning: Could not set memory limit")
-
-    # 运行内存优化分析
-    run_memory_efficient_analysis(args.dump_file, args.out_dir)
+    main()

@@ -1,243 +1,100 @@
-import MDAnalysis as mda
-from MDAnalysis.lib.distances import apply_PBC
 import numpy as np
 import matplotlib.pyplot as plt
+import MDAnalysis as mda
 import pandas as pd
 from tqdm import tqdm
+from numba import jit, prange
 
 
-def compute_mobility_at_tau(trajectory_file, tau_frames, use_pbc=True, stride=1, max_origins=None):
-    """
-    Compute mobility (displacement) of water molecules at a specific time lag tau.
+class MaxMobilityCalculator:
+    def __init__(
+        self,
+        universe: mda.Universe,
+        shear_rate: float = 0.0,
+        time_step: float = 1.0,
+        start_index: int = 0,
+    ):
+        self.universe = universe
+        self.n_frames = len(universe.trajectory)
+        self.n_particles = len(universe.atoms)
+        self.O_atoms = self.universe.select_atoms("type 1")
+        # 预加载轨迹数据到内存，只针对O原子
+        self.frames = self.n_frames - start_index
+        self.coords = np.zeros((self.frames, len(self.O_atoms), 3))
+        for ts in tqdm(self.universe.trajectory[start_index:], desc="Loading trajectory data"):
+            self.coords[ts.frame - start_index] = self.O_atoms.positions.copy()
+        if shear_rate != 0.0:
+            self.shear_correction(shear_rate, time_step)
 
-    Parameters:
-    -----------
-    trajectory_file : str
-        Path to the trajectory file in LAMMPSDUMP format.
-    tau_frames : int
-        Time lag in frames for displacement calculation.
-    use_pbc : bool
-        Whether to apply periodic boundary conditions.
-    stride : int
-        Process every nth frame to reduce computation.
-    max_origins : int or None
-        Maximum number of time origins to consider.
+    def shear_correction(self, shear_rate, time_step):
+        for frame in tqdm(range(self.frames), desc="Applying shear correction"):
+            if frame == 0:
+                continue
+            y_positions = self.coords[frame - 1, :, 1]
+            # 修正x坐标以消除剪切流影响
+            self.coords[frame:, :, 0] -= shear_rate * time_step * y_positions
 
-    Returns:
-    --------
-    displacements : np.ndarray
-        Array of shape (n_origins, n_water) containing displacements.
-    valid_origins : int
-        Number of valid time origins processed.
-    """
-    u = mda.Universe(trajectory_file, format="LAMMPSDUMP")
-    O_atoms = u.select_atoms("type 1")
-    n_water = len(O_atoms)
+    @staticmethod
+    @jit(nopython=True, parallel=True)
+    def compute_displacements_numba(t0, delta_t, positions, n_frames, n_atoms):
+        if t0 + delta_t >= n_frames:
+            return None, None
+        disp = np.zeros((n_atoms, 3))
+        for i in prange(n_atoms):
+            start_pos = positions[t0, i]
+            end_pos = positions[t0 + delta_t, i]
+            disp[i] = end_pos - start_pos
+        disp_root_squared = np.sqrt(np.sum(disp**2, axis=1))  # shape (n_atoms,)
+        return disp, disp_root_squared
 
-    if n_water == 0:
-        raise ValueError("No water molecules found in the trajectory.")
+    def calculate_max_mobility_for_one_origin(self, t0: int, delta_t: int):
+        return self.compute_displacements_numba(
+            t0, delta_t, self.coords, self.frames, len(self.O_atoms)
+        )
 
-    total_frames = len(u.trajectory)
-    available_origins = total_frames - tau_frames
-
-    if available_origins <= 0:
-        raise ValueError(f"Tau ({tau_frames}) is too large. Maximum tau: {total_frames - 1}")
-
-    # Determine frame indices to process
-    frame_indices = np.arange(0, available_origins, stride)
-    if max_origins:
-        frame_indices = frame_indices[:max_origins]
-
-    n_origins = len(frame_indices)
-    print(f"Processing {n_origins} time origins with tau = {tau_frames} frames")
-
-    displacements = np.zeros((n_origins, n_water))
-
-    for i, t0 in enumerate(tqdm(frame_indices, desc="Computing displacements")):
-        # Get initial positions
-        u.trajectory[t0]
-        r0 = O_atoms.positions.copy()
-        box0 = u.trajectory.ts.dimensions if use_pbc else None
-
-        # Get final positions
-        u.trajectory[t0 + tau_frames]
-        r_tau = O_atoms.positions.copy()
-
-        # Calculate displacement
-        displacement_vectors = r_tau - r0
-
-        if use_pbc and box0 is not None:
-            # Apply periodic boundary conditions
-            displacement_vectors = apply_PBC(displacement_vectors, box0)
-
-        # Calculate displacement magnitudes
-        displacements[i] = np.linalg.norm(displacement_vectors, axis=1)
-
-    return displacements, n_origins
+    def time_origin_average(self, delta_t: int):
+        n_origins = self.frames - delta_t
+        disp_accum = np.zeros((len(self.O_atoms), 3))
+        dist = np.zeros(len(self.O_atoms))
+        for t0 in tqdm(range(n_origins), desc="Calculating time origin average"):
+            disp, disp_root_squared = self.calculate_max_mobility_for_one_origin(t0, delta_t)
+            disp_accum += disp
+            dist += disp_root_squared
+        return disp_accum / n_origins, dist / n_origins
 
 
-def compute_mobility_distribution(trajectory_file, tau_frames, bins=100, use_pbc=True):
-    """
-    Compute and analyze the distribution of mobilities at a given tau.
-
-    Parameters:
-    -----------
-    trajectory_file : str
-        Path to trajectory file.
-    tau_frames : int
-        Time lag in frames.
-    bins : int
-        Number of histogram bins.
-    use_pbc : bool
-        Whether to apply periodic boundary conditions.
-
-    Returns:
-    --------
-    hist_data : dict
-        Dictionary containing histogram data and statistics.
-    """
-    displacements, n_origins = compute_mobility_at_tau(trajectory_file, tau_frames, use_pbc=use_pbc)
-
-    all_displacements = displacements.flatten()
-
-    # Calculate statistics
-    stats = {
-        "mean": np.mean(all_displacements),
-        "std": np.std(all_displacements),
-        "median": np.median(all_displacements),
-        "q25": np.percentile(all_displacements, 25),
-        "q75": np.percentile(all_displacements, 75),
-        "q90": np.percentile(all_displacements, 90),
-        "q95": np.percentile(all_displacements, 95),
-        "q99": np.percentile(all_displacements, 99),
-        "max": np.max(all_displacements),
-        "n_origins": n_origins,
-        "n_molecules": len(displacements[0]) if len(displacements) > 0 else 0,
-        "total_samples": len(all_displacements),
-    }
-
-    # Create histogram
-    hist, bin_edges = np.histogram(all_displacements, bins=bins, density=True)
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-
-    return {
-        "displacements": all_displacements,
-        "histogram": hist,
-        "bin_centers": bin_centers,
-        "bin_edges": bin_edges,
-        "stats": stats,
-    }
-
-
-def plot_mobility_analysis(hist_data, tau_frames, dt=10, save_prefix="mobility"):
-    """
-    Create comprehensive plots for mobility analysis.
-    """
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
-
-    displacements = hist_data["displacements"]
-    stats = hist_data["stats"]
-    tau_ps = tau_frames * dt
-
-    # Histogram
-    ax1.hist(displacements, bins=100, density=True, alpha=0.7, color="skyblue", edgecolor="black")
-    ax1.axvline(stats["mean"], color="red", linestyle="--", label=f"Mean: {stats['mean']:.2f} Å")
-    ax1.axvline(
-        stats["median"], color="orange", linestyle="--", label=f"Median: {stats['median']:.2f} Å"
-    )
-    ax1.set_xlabel("Displacement (Å)")
-    ax1.set_ylabel("Probability Density")
-    ax1.set_title(f"Displacement Distribution at τ = {tau_ps} ps")
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-
-    # Log-scale histogram
-    ax2.hist(
-        displacements, bins=100, density=True, alpha=0.7, color="lightgreen", edgecolor="black"
-    )
-    ax2.set_xlabel("Displacement (Å)")
-    ax2.set_ylabel("Probability Density")
-    ax2.set_yscale("log")
-    ax2.set_title(f"Log-scale Distribution")
-    ax2.grid(True, alpha=0.3)
-
-    # Cumulative distribution
-    sorted_disp = np.sort(displacements)
-    cumulative = np.arange(1, len(sorted_disp) + 1) / len(sorted_disp)
-    ax3.plot(sorted_disp, cumulative, "b-", linewidth=2)
-    ax3.axhline(0.95, color="red", linestyle="--", label=f"95th percentile: {stats['q95']:.2f} Å")
-    ax3.axhline(
-        0.99, color="orange", linestyle="--", label=f"99th percentile: {stats['q99']:.2f} Å"
-    )
-    ax3.set_xlabel("Displacement (Å)")
-    ax3.set_ylabel("Cumulative Probability")
-    ax3.set_title("Cumulative Distribution")
-    ax3.legend()
-    ax3.grid(True, alpha=0.3)
-
-    # Statistics table
-    ax4.axis("off")
-    stats_text = f"""
-    Statistics for τ = {tau_ps} ps
-    
-    Mean: {stats['mean']:.3f} Å
-    Std:  {stats['std']:.3f} Å
-    Median: {stats['median']:.3f} Å
-    
-    Percentiles:
-    25th: {stats['q25']:.3f} Å
-    75th: {stats['q75']:.3f} Å
-    90th: {stats['q90']:.3f} Å
-    95th: {stats['q95']:.3f} Å
-    99th: {stats['q99']:.3f} Å
-    Max:  {stats['max']:.3f} Å
-    
-    Samples: {stats['total_samples']:,}
-    Origins: {stats['n_origins']:,}
-    Molecules: {stats['n_molecules']:,}
-    """
-    ax4.text(
-        0.1,
-        0.9,
-        stats_text,
-        transform=ax4.transAxes,
-        fontsize=10,
-        verticalalignment="top",
-        fontfamily="monospace",
-        bbox=dict(boxstyle="round", facecolor="lightgray", alpha=0.8),
-    )
-
-    plt.tight_layout()
-    plt.savefig(f"{save_prefix}_analysis.png", dpi=300, bbox_inches="tight")
-    plt.show()
-
-    return fig
-
-
+# 示例使用
 if __name__ == "__main__":
-    dump_file = "/home/debian/water/TIP4P/2005/benchmark/220/quenching/dump_H2O.lammpstrj"
-    t_alpha = 7900  # 7900 ps
-    dt = 10  # 10 ps
-    frame_alpha = t_alpha // dt
-    displacements, n_origins = compute_mobility_at_tau(dump_file, frame_alpha, use_pbc=False)
-    all_displacements = displacements.flatten()
+    pathfiles = [
+        # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-4_246.lammpstrj",
+        # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_7.5e-5_246.lammpstrj",
+        "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-5_246.lammpstrj",
+        # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_1e-5_246.lammpstrj",
+    ]
+    # pathfiles = ["/home/debian/water/TIP4P/2005/2020/4096/traj_2.5e-4_246_everystep.lammpstrj"]
+    # pathfiles = ["/home/debian/water/TIP4P/2005/dump_H2O_246_10.lammpstrj"]
+    output_h5 = "/home/debian/water/TIP4P/2005/2020/rst/4096/new_mobility_results.h5"
+    # output_h5 = "test_msd_results.h5"
+    store = pd.HDFStore(output_h5)
 
-    n_molecules = displacements.shape[1]
-    molecule_ids = np.tile(np.arange(n_molecules), n_origins)
-    origin_ids = np.repeat(np.arange(n_origins), n_molecules)
+    start_index = 2000  # 跳过前2000帧以避免初始非平衡影响
+    t_x = 3.0  # ps
+    for pathfile in pathfiles:
+        time_step = 0.05  # ps
+        target_frame = int(t_x / time_step)
+        u = mda.Universe(pathfile, format="LAMMPSDUMP")
+        mobility_calculator = MaxMobilityCalculator(
+            u, shear_rate=2.5e-2, time_step=time_step
+        )  # shear_rate in 1/ps(2.5e-5 1/fs)
+        # msd_calculator = MSDCalculator(u, start_index=start_index)  # 无剪切流
+        disp, dist = mobility_calculator.time_origin_average(target_frame)
+        times = np.arange(len(dist)) * time_step
+        idx = np.arange(len(dist))
 
-    df = pd.DataFrame(
-        {"displacement": all_displacements, "molecule_id": molecule_ids, "origin_frame": origin_ids}
-    )
-    df.to_csv("quenching/max_mobility.csv", index=False)
-
-    # Analyze distribution
-    hist_data = compute_mobility_distribution(dump_file, frame_alpha, bins=100)
-    plot_mobility_analysis(hist_data, frame_alpha, dt, "quenching/max_mobility")
-    # Print statistics
-    stats = hist_data["stats"]
-    print(f"\nMobility Statistics at tau = {t_alpha} ps:")
-    print(f"Mean displacement: {stats['mean']:.3f} Å")
-    print(f"95th percentile: {stats['q95']:.3f} Å")
-    print(f"Maximum displacement: {stats['max']:.3f} Å")
-    print(f"Total samples: {stats['total_samples']:,}")
+        df = pd.DataFrame({"O_idx": idx, "avg_dist": dist})
+        filename = pathfile.split("traj_")[-1].split("_246")[0]
+        # filename = "1e-5-x"
+        store.put(filename, df, format="table")
+        print(f"Saved mobility results to key: {filename}")
+    store.close()
+    print(f"All mobility results saved to: {output_h5}")

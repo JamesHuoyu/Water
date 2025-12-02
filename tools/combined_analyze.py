@@ -1,406 +1,378 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
-import MDAnalysis as mda
-from scipy.spatial.distance import pdist, squareform
-from scipy.stats import gaussian_kde
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-import seaborn as sns
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from mpl_toolkits.mplot3d import Axes3D
 from tqdm import tqdm
-import warnings
 
-warnings.filterwarnings("ignore")
-
-
-def compute_coarse_grained_coordinate(trajectory_file, method="pca", n_neighbors=6):
-    """
-    Compute a coarse-grained structural coordinate.
-
-    Parameters:
-    -----------
-    trajectory_file : str
-        Path to trajectory file
-    method : str
-        Method for CG coordinate ('pca', 'local_density', 'coordination', 'q6')
-    n_neighbors : int
-        Number of neighbors for local structure analysis
-
-    Returns:
-    --------
-    xi_cg : np.ndarray
-        Coarse-grained coordinate values for each frame
-    """
-    u = mda.Universe(trajectory_file, format="LAMMPSDUMP")
-    O_atoms = u.select_atoms("type 1")
-    n_frames = len(u.trajectory)
-    n_atoms = len(O_atoms)
-
-    xi_cg = np.zeros(n_frames)
-
-    print(f"Computing CG coordinate using {method} method...")
-
-    if method == "pca":
-        # Use PCA of atomic positions as CG coordinate
-        positions_all = []
-        for ts in tqdm(u.trajectory, desc="Loading positions"):
-            positions_all.append(O_atoms.positions.flatten())
-
-        positions_all = np.array(positions_all)
-        scaler = StandardScaler()
-        positions_scaled = scaler.fit_transform(positions_all)
-
-        pca = PCA(n_components=1)
-        xi_cg = pca.fit_transform(positions_scaled).flatten()
-
-    elif method == "local_density":
-        # Local density as CG coordinate
-        for i, ts in enumerate(tqdm(u.trajectory, desc="Computing local density")):
-            positions = O_atoms.positions
-
-            # Compute pairwise distances
-            distances = squareform(pdist(positions))
-
-            # Count neighbors within cutoff (e.g., 3.5 Å)
-            cutoff = 3.5
-            neighbors = np.sum(distances < cutoff, axis=1) - 1  # Subtract self
-            xi_cg[i] = np.mean(neighbors)  # Average local coordination
-
-    elif method == "coordination":
-        # Coordination number based CG coordinate
-        for i, ts in enumerate(tqdm(u.trajectory, desc="Computing coordination")):
-            positions = O_atoms.positions
-            box = ts.dimensions
-
-            # Apply PBC if needed
-            if box is not None:
-                # Simple coordination calculation
-                distances = squareform(pdist(positions))
-                coordination = np.sum(distances < 3.2, axis=1) - 1
-                xi_cg[i] = np.std(coordination)  # Structural disorder measure
-            else:
-                distances = squareform(pdist(positions))
-                coordination = np.sum(distances < 3.2, axis=1) - 1
-                xi_cg[i] = np.std(coordination)
-
-    elif method == "q6":
-        # Steinhardt Q6 order parameter (simplified)
-        for i, ts in enumerate(tqdm(u.trajectory, desc="Computing Q6")):
-            positions = O_atoms.positions
-
-            # Simplified Q6 calculation
-            distances = squareform(pdist(positions))
-
-            q6_local = []
-            for j in range(n_atoms):
-                # Find nearest neighbors
-                neighbors_idx = np.argsort(distances[j])[1 : n_neighbors + 1]
-                neighbor_distances = distances[j][neighbors_idx]
-
-                # Simple measure of local order
-                q6_local.append(np.std(neighbor_distances))
-
-            xi_cg[i] = np.mean(q6_local)
-
-    return xi_cg
+color_map = {"HDL": "blue", "LDL": "red"}
 
 
-def compute_displacement_max_per_frame(trajectory_file, tau_frames, stride=1):
-    """
-    Compute maximum displacement for each frame (time origin).
-
-    Parameters:
-    -----------
-    trajectory_file : str
-        Path to trajectory file
-    tau_frames : int
-        Time lag for displacement calculation
-    stride : int
-        Frame stride
-
-    Returns:
-    --------
-    dr_max : np.ndarray
-        Maximum displacement for each valid frame
-    valid_frames : np.ndarray
-        Frame indices that were processed
-    """
-    u = mda.Universe(trajectory_file, format="LAMMPSDUMP")
-    O_atoms = u.select_atoms("type 1")
-    total_frames = len(u.trajectory)
-
-    valid_frames = np.arange(0, total_frames - tau_frames, stride)
-    n_valid = len(valid_frames)
-    dr_max = np.zeros(n_valid)
-
-    print(f"Computing max displacements for {n_valid} frames with tau={tau_frames}")
-
-    for i, t0 in enumerate(tqdm(valid_frames, desc="Computing displacements")):
-        # Initial positions
-        u.trajectory[t0]
-        r0 = O_atoms.positions.copy()
-
-        # Final positions
-        u.trajectory[t0 + tau_frames]
-        r_tau = O_atoms.positions.copy()
-
-        # Compute displacements
-        displacements = np.linalg.norm(r_tau - r0, axis=1)
-
-        # Store maximum displacement for this frame
-        dr_max[i] = np.max(displacements)
-
-    return dr_max, valid_frames
+def apply_shear_correction(coords, shear_rate, time_step):
+    n_frames = coords.shape[0]
+    for frame in tqdm(range(n_frames), desc="Applying shear correction"):
+        if frame == 0:
+            continue
+        y_positions = coords[frame - 1, :, 1]
+        # 修正x坐标以消除剪切流影响
+        coords[frame:, :, 0] -= shear_rate * time_step * y_positions
+    return coords
 
 
-def create_2d_probability_map(x, y, bins=50, method="kde"):
-    """
-    Create 2D probability density map.
+def cal_max_displacement_during_time_interval(coords, delta_t):
+    """计算在给定时间间隔内的最大位移及其对应的时间起点"""
+    n_frames = coords.shape[0]
+    n_particles = coords.shape[1]
 
-    Parameters:
-    -----------
-    x, y : np.ndarray
-        Data coordinates
-    bins : int or tuple
-        Number of bins for histogram
-    method : str
-        'kde' for kernel density estimation or 'hist' for histogram
+    disp_records = []
+    for t0 in range(n_frames - delta_t):
+        max_disp = np.zeros(n_particles)
+        max_t = np.zeros(n_particles)
+        for t in range(delta_t):
+            disp = np.linalg.norm(coords[t0 + t] - coords[t0], axis=1)
+            max_t = np.where(disp > max_disp, t, max_t)
+            np.maximum(max_disp, disp, out=max_disp)
+        disp_records.append((max_disp, max_t))
 
-    Returns:
-    --------
-    X, Y : np.ndarray
-        Meshgrid coordinates
-    Z : np.ndarray
-        Probability density values
-    """
-    if method == "kde":
-        # Use KDE for smooth probability density
-        xy = np.vstack([x, y])
-        kde = gaussian_kde(xy)
-
-        # Create grid
-        x_min, x_max = np.min(x), np.max(x)
-        y_min, y_max = np.min(y), np.max(y)
-
-        x_grid = np.linspace(x_min, x_max, bins)
-        y_grid = np.linspace(y_min, y_max, bins)
-        X, Y = np.meshgrid(x_grid, y_grid)
-
-        # Evaluate KDE
-        positions = np.vstack([X.ravel(), Y.ravel()])
-        Z = kde(positions).reshape(X.shape)
-
-    else:
-        # Use 2D histogram
-        H, x_edges, y_edges = np.histogram2d(x, y, bins=bins, density=True)
-        X, Y = np.meshgrid(x_edges[:-1], y_edges[:-1])
-        Z = H.T
-
-    return X, Y, Z
+    return disp_records
 
 
-def plot_combined_analysis(xi_cg, ln_dr_max, title="Combined Structural-Dynamic Analysis"):
-    """
-    Create the combined analysis plot similar to your reference.
+def plot_max_displacement_over_time(coords, delta_t):
+    disp_records = cal_max_displacement_during_time_interval(coords, delta_t)
+    max_t = [record[1] for record in disp_records]
+    max_disps = [record[0] for record in disp_records]
+    # times = np.arange(len(max_disps))
 
-    Parameters:
-    -----------
-    xi_cg : np.ndarray
-        Coarse-grained structural coordinate
-    ln_dr_max : np.ndarray
-        Natural log of maximum displacements
-    title : str
-        Plot title
-    """
-    # Create 2D probability density
-    X, Y, Z = create_2d_probability_map(xi_cg, ln_dr_max, bins=60, method="kde")
-
-    # Create the plot
-    fig, ax = plt.subplots(figsize=(10, 8))
-
-    # Contour plot
-    levels = np.linspace(0, np.max(Z), 15)
-    contour = ax.contourf(X, Y, Z, levels=levels, cmap="jet", extend="max")
-
-    # Add contour lines
-    contour_lines = ax.contour(
-        X, Y, Z, levels=levels[::2], colors="black", alpha=0.3, linewidths=0.5
+    plt.figure(figsize=(8, 6))
+    # plt.plot(times, max_disps, marker="o")
+    # plt.hist(np.concatenate(max_t), bins=30)
+    plt.hist(
+        np.log(np.concatenate(max_disps)),
+        bins=100,
+        density=True,
+        color="skyblue",
+        edgecolor="black",
+        alpha=0.7,
     )
-
-    # Colorbar
-    cbar = plt.colorbar(contour, ax=ax, shrink=0.8)
-    cbar.set_label("Probability Density", fontsize=14)
-
-    # Labels and formatting
-    ax.set_xlabel(r"$\xi^{CG}$ (Å)", fontsize=16)
-    ax.set_ylabel(r"ln($\Delta r_{max}$) (Å)", fontsize=16)
-    ax.set_title(title, fontsize=16)
-
-    # Set axis limits similar to your plot
-    ax.set_xlim(0.4, 1.0)
-    ax.set_ylim(-0.5, 2.5)
-
-    # Grid
-    ax.grid(True, alpha=0.3)
-
-    # Adjust layout
-    plt.tight_layout()
-
-    return fig, ax
-
-
-def analyze_correlation(xi_cg, dr_max):
-    """
-    Analyze correlation between structural and dynamic properties.
-    """
-    ln_dr_max = np.log(dr_max)
-
-    # Calculate correlation coefficient
-    correlation = np.corrcoef(xi_cg, ln_dr_max)[0, 1]
-
-    # Calculate conditional averages
-    n_bins = 20
-    xi_bins = np.linspace(np.min(xi_cg), np.max(xi_cg), n_bins)
-    conditional_avg = []
-    conditional_std = []
-
-    for i in range(len(xi_bins) - 1):
-        mask = (xi_cg >= xi_bins[i]) & (xi_cg < xi_bins[i + 1])
-        if np.sum(mask) > 10:  # Require at least 10 points
-            conditional_avg.append(np.mean(ln_dr_max[mask]))
-            conditional_std.append(np.std(ln_dr_max[mask]))
-        else:
-            conditional_avg.append(np.nan)
-            conditional_std.append(np.nan)
-
-    bin_centers = (xi_bins[:-1] + xi_bins[1:]) / 2
-
-    return {
-        "correlation": correlation,
-        "bin_centers": bin_centers,
-        "conditional_avg": np.array(conditional_avg),
-        "conditional_std": np.array(conditional_std),
-    }
-
-
-def main():
-    """Main analysis function."""
-
-    # Configuration
-    trajectory_file = "/home/debian/water/TIP4P/2005/benchmark/220/quenching/dump_H2O.lammpstrj"
-    chi4_file = "quenching/chi4_values.csv"  # From previous analysis
-    dt = 10  # ps per frame
-
-    # Parameters
-    cg_method = "local_density"  # Options: 'pca', 'local_density', 'coordination', 'q6'
-    stride = 5  # Process every 5th frame for efficiency
-
-    print("=== Combined Structural-Dynamic Analysis ===")
-
-    # # Step 1: Determine optimal tau from chi4 (if available)
-    # if pd.io.common.file_exists(chi4_file):
-    #     chi4_data = pd.read_csv(chi4_file)
-    #     max_idx = np.argmax(chi4_data["chi4"].values)
-    #     tau_optimal_ps = chi4_data["t"].iloc[max_idx]
-    #     tau_frames = int(tau_optimal_ps / dt)
-    #     print(f"Using optimal tau from chi4: {tau_optimal_ps:.1f} ps ({tau_frames} frames)")
-    # else:
-    #     # Use reasonable default
-    #     tau_frames = 100  # frames
-    #     print(f"Using default tau: {tau_frames} frames ({tau_frames * dt} ps)")
-
-    # # Step 2: Compute coarse-grained structural coordinate
-    # xi_cg_all = compute_coarse_grained_coordinate(trajectory_file, method=cg_method)
-
-    # # Step 3: Compute maximum displacements
-    # dr_max, valid_frames = compute_displacement_max_per_frame(
-    #     trajectory_file, tau_frames, stride=stride
-    # )
-    xi_cg_all = pd.read_csv("quenching/cg_zeta.csv", index_col=0)["cg_zeta"].values
-    dr_max = pd.read_csv("quenching/max_mobility.csv", index_col=2)["displacement"].values
-    tau_frames = 790  # 7900 ps
-    valid_frames = len(dr_max)
-    # Step 4: Align data (both arrays must have same length)
-    # Take xi_cg values corresponding to valid frames
-    xi_cg = xi_cg_all[:valid_frames]
-    print(xi_cg.shape)
-    print(f"xi_cg: {xi_cg}")
-    print(f"xi_cg_all: {xi_cg_all[262794]}")
-    ln_dr_max = np.log(dr_max)
-
-    print(f"Data points: {len(xi_cg)}")
-    print(f"Xi_CG range: [{np.min(xi_cg):.3f}, {np.max(xi_cg):.3f}]")
-    print(f"ln(dr_max) range: [{np.min(ln_dr_max):.3f}, {np.max(ln_dr_max):.3f}]")
-
-    # Step 5: Create the main plot
-    fig, ax = plot_combined_analysis(
-        xi_cg, ln_dr_max, title=f"Structural-Dynamic Correlation (τ={tau_frames*dt} ps)"
+    plt.xlabel("Max Displacement")
+    plt.xscale("log")
+    plt.ylabel("Frequency")
+    plt.yscale("log")
+    plt.title(f"Max Displacement over Time (Δt={delta_t} frames)")
+    plt.grid()
+    plt.figure(figsize=(8, 6))
+    plt.hist(
+        np.concatenate(max_t),
+        bins=30,
+        density=True,
+        color="lightgreen",
+        edgecolor="black",
+        alpha=0.7,
     )
-
-    # Step 6: Analyze correlation
-    correlation_analysis = analyze_correlation(xi_cg, dr_max)
-    print(f"Correlation coefficient: {correlation_analysis['correlation']:.3f}")
-
-    # Step 7: Create additional analysis plots
-    fig2, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
-
-    # Scatter plot
-    ax1.scatter(xi_cg, ln_dr_max, alpha=0.5, s=10)
-    ax1.set_xlabel(r"$\xi^{CG}$ (Å)")
-    ax1.set_ylabel(r"ln($\Delta r_{max}$) (Å)")
-    ax1.set_title(f'Scatter Plot (r={correlation_analysis["correlation"]:.3f})')
-    ax1.grid(True, alpha=0.3)
-
-    # Marginal distributions
-    ax2.hist(xi_cg, bins=50, alpha=0.7, density=True, color="blue")
-    ax2.set_xlabel(r"$\xi^{CG}$ (Å)")
-    ax2.set_ylabel("Probability Density")
-    ax2.set_title("Structural Coordinate Distribution")
-    ax2.grid(True, alpha=0.3)
-
-    ax3.hist(ln_dr_max, bins=50, alpha=0.7, density=True, color="red")
-    ax3.set_xlabel(r"ln($\Delta r_{max}$) (Å)")
-    ax3.set_ylabel("Probability Density")
-    ax3.set_title("Dynamic Property Distribution")
-    ax3.grid(True, alpha=0.3)
-
-    # Conditional average
-    valid_mask = ~np.isnan(correlation_analysis["conditional_avg"])
-    bin_centers = correlation_analysis["bin_centers"][valid_mask]
-    conditional_avg = correlation_analysis["conditional_avg"][valid_mask]
-    conditional_std = correlation_analysis["conditional_std"][valid_mask]
-
-    ax4.errorbar(
-        bin_centers, conditional_avg, yerr=conditional_std, marker="o", capsize=3, color="green"
-    )
-    ax4.set_xlabel(r"$\xi^{CG}$ (Å)")
-    ax4.set_ylabel(r"$\langle$ln($\Delta r_{max}$)$\rangle$ (Å)")
-    ax4.set_title("Conditional Average")
-    ax4.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-
-    # Step 8: Save results
-    # Save data
-    results_df = pd.DataFrame(
-        {"frame": valid_frames, "xi_cg": xi_cg, "dr_max": dr_max, "ln_dr_max": ln_dr_max}
-    )
-    results_df.to_csv("combined_analysis_data.csv", index=False)
-
-    # Save plots
-    fig.savefig("combined_analysis_2d.png", dpi=300, bbox_inches="tight")
-    fig2.savefig("combined_analysis_detailed.png", dpi=300, bbox_inches="tight")
-
-    print("\nAnalysis complete!")
-    print("Files saved:")
-    print("- combined_analysis_data.csv")
-    print("- combined_analysis_2d.png")
-    print("- combined_analysis_detailed.png")
-
+    plt.xlabel("Time to Max Displacement (frames)")
+    plt.ylabel("Frequency")
+    plt.title(f"Time to Max Displacement Distribution (Δt={delta_t} frames)")
+    plt.grid()
     plt.show()
 
-    return xi_cg, dr_max, ln_dr_max
+
+def assign_colors_by_type(particle_types, frame):
+    colors = []
+    for particle_id in particle_types:
+        current_type = particle_types[particle_id, frame]
+        colors.append(color_map[current_type])
+    return colors
+
+
+def plot_trajectories_with_type_changes(coords, particle_types, time_window=100):
+    fig = plt.figure(figsize=(12, 10))
+    ax = fig.add_subplot(111, projection="3d")
+
+    n_particles = coords.shape[1]
+
+    for particle_id in range(n_particles):
+        traj = coords[:time_window, particle_id, :]
+        type_seq = particle_types[particle_id, :time_window]
+
+        change_points = np.where(type_seq[:-1] != type_seq[1:])[0] + 1
+        segments = np.split(np.arange(len(traj)), change_points)
+
+        for i, seg in enumerate(segments):
+            if len(seg) > 1:
+                seg_traj = traj[seg]
+                seg_type = type_seq[seg[0]]
+                ax.plot(
+                    seg_traj[:, 0],
+                    seg_traj[:, 1],
+                    seg_traj[:, 2],
+                    color=color_map[seg_type],
+                    alpha=0.6,
+                    linewidth=1,
+                )
+
+        ax.scatter(*traj[0], color="green", s=20, marker="o")
+        ax.scatter(*traj[-1], color="black", s=20, marker="s")
+
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+    plt.title("Particle Trajectories with Type Changes")
+    plt.show()
+
+
+def plot_local_concentration(coordinates, particle_types, frame, grid_size=3):
+    """计算并显示局部HDL/LDL浓度分布"""
+    from scipy import stats
+
+    positions = coordinates[frame]
+    types = [particle_types[i, frame] for i in range(len(positions))]
+
+    # 创建网格
+    x_min, x_max = positions[:, 0].min(), positions[:, 0].max()
+    y_min, y_max = positions[:, 1].min(), positions[:, 1].max()
+
+    xi = np.linspace(x_min, x_max, grid_size)
+    yi = np.linspace(y_min, y_max, grid_size)
+
+    # 计算每个网格点的HDL浓度
+    hdl_positions = positions[[i for i, t in enumerate(types) if t == "HDL"]]
+
+    if len(hdl_positions) > 0:
+        # 使用KDE估计密度
+        kde = stats.gaussian_kde(hdl_positions[:, :2].T)
+        X, Y = np.meshgrid(xi, yi)
+        Z = kde(np.vstack([X.ravel(), Y.ravel()])).reshape(X.shape)
+
+        plt.figure(figsize=(10, 8))
+        plt.contourf(X, Y, Z, levels=20, cmap="Blues")
+        plt.colorbar(label="HDL Local Concentration")
+
+        # 叠加粒子位置
+        for i, (pos, p_type) in enumerate(zip(positions, types)):
+            color = color_map[p_type]
+            plt.scatter(pos[0], pos[1], c=color, s=50, edgecolors="black", linewidth=0.5)
+
+        plt.title(f"Local Concentration at Frame {frame}")
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.show()
+
+
+def analyze_type_clustering(coordinates, particle_types, frame):
+    """分析类型聚集情况"""
+
+    positions = coordinates[frame]
+    types = [particle_types[i, frame] for i in range(len(positions))]
+
+    plt.figure(figsize=(12, 6))
+
+    # 子图2：显示类型分布
+    for i, (pos, p_type) in enumerate(zip(positions, types)):
+        color = color_map[p_type]
+        plt.scatter(pos[0], pos[1], c=color, s=50)
+    plt.title("Type Distribution")
+    plt.xlabel("X")
+    plt.ylabel("Y")
+
+    plt.tight_layout()
+    plt.show()
+
+    # # 计算团簇的类型纯度
+    # cluster_purities = []
+    # for cluster_id in unique_clusters:
+    #     cluster_indices = np.where(labels == cluster_id)[0]
+    #     cluster_types = [types[i] for i in cluster_indices]
+    #     hdl_fraction = cluster_types.count("HDL") / len(cluster_types)
+    #     cluster_purities.append(hdl_fraction)
+
+    # return cluster_purities
+
+
+def plot_displacement_vecmap(coordinates, particle_types, time_interval=10):
+    """绘制位移的矢量图"""
+    n_frames = coordinates.shape[0]
+    n_particles = coordinates.shape[1]
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    disp_vectors = []
+    for particle_id in range(n_particles):
+        start_pos = coordinates[0, particle_id, :2]
+        end_pos = coordinates[time_interval, particle_id, :2]
+        disp_vec = end_pos - start_pos
+        disp_vectors.append(disp_vec)
+
+    disp_vectors = np.array(disp_vectors)
+    X = coordinates[0, :, 0]
+    Y = coordinates[0, :, 1]
+    X, Y = np.meshgrid(X, Y)
+    ax.quiver(
+        coordinates[0, :, 0],
+        coordinates[0, :, 1],
+        disp_vectors[:, 0],
+        disp_vectors[:, 1],
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        color="teal",
+        alpha=0.7,
+    )
+
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_title(f"Displacement Vector Map over {time_interval} Frames")
+    plt.grid()
+    plt.show()
+
+
+def plot_trajectory_for_one_particle(coords, particle_id, particle_types):
+    """绘制单个粒子的三维轨迹,并根据粒子类型变化进行颜色区分"""
+    traj = coords[:, particle_id, :]
+    types = particle_types[particle_id, :]
+    fig = plt.figure(figsize=(10, 8))
+    # 根据类型变化分段绘制轨迹
+    change_points = np.where(types[:-1] != types[1:])[0] + 1
+    segments = np.split(np.arange(len(traj)), change_points)
+    ax = fig.add_subplot(111, projection="3d")
+    for i, seg in enumerate(segments):
+        if len(seg) > 1:
+            seg_traj = traj[seg]
+            seg_type = types[seg[0]]
+            ax.plot(
+                seg_traj[:, 0],
+                seg_traj[:, 1],
+                seg_traj[:, 2],
+                color=color_map[seg_type],
+                alpha=0.7,
+                linewidth=2,
+            )
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+    plt.title(f"Trajectory of Particle {particle_id} with Type Changes")
+    plt.legend()
+    plt.show()
+    # ax.plot(traj[:, 0], traj[:, 1], traj[:, 2], color="purple", alpha=0.7)
+    # ax.scatter(*traj[0], color="green", s=50, label="Start")
+    # ax.scatter(*traj[-1], color="red", s=50, label="End")
+
+    # ax.set_xlabel("X")
+    # ax.set_ylabel("Y")
+    # ax.set_zlabel("Z")
+    # plt.title(f"Trajectory of Particle {particle_id}")
+    # plt.legend()
+    # plt.show()
 
 
 if __name__ == "__main__":
-    xi_cg, dr_max, ln_dr_max = main()
+    # df = pd.read_csv("/home/debian/water/TIP4P/2005/2020/rst/equili/zeta_cg_L1.csv")
+    # 跟踪展示每个粒子在时间尺度上发生了多少次的分类变化
+    # 分成多个时间段来统计每个时间段内的分类变化次数
+    # frames = df["frame"].unique() - 9500
+    # hdl_prob = df["distance"].values
+    # classification = np.where(hdl_prob >= 0.045, "LDL", "HDL")
+    # O_ids = df["O_idx"].unique() // 3
+    traj_file = "/home/debian/water/TIP4P/2005/2020/dump_H2O_225.lammpstrj"
+    import MDAnalysis as mda
+    from MDAnalysis.transformations import wrap
+
+    u = mda.Universe(traj_file, format="LAMMPSDUMP")
+    # u.trajectory.add_transformations(wrap(u.atoms))
+    start_frame = 9000
+    O_atoms = u.select_atoms("type 1")
+    frames = np.arange(0, 1000)  # 分析1000帧
+    O_ids = O_atoms.indices
+    coords = np.zeros((len(frames), len(O_ids), 3))
+    for ts in tqdm(
+        u.trajectory[start_frame : start_frame + len(frames)], desc="Extracting coordinates"
+    ):
+        current_frame = ts.frame - start_frame
+        coords[current_frame] = O_atoms.positions.copy()
+    print("Coordinates extracted.")
+
+    # shear_rate = 2.5e-2  # 1/ps
+    time_step = 0.2  # ps
+
+    # 启用函数进行剪切校正
+    # coords = apply_shear_correction(coords, shear_rate, time_step)
+
+    # plot_local_concentration(coords, classification.reshape(len(O_ids), len(frames)), frame=0)
+    # analyze_type_clustering(coords, classification.reshape(len(O_ids), len(frames)), frame=200)
+
+    # 绘制最大动态不均匀性时间间隔下的位移热图
+    time_x = 68  # ps
+    # time_x = 0.61647680  # ps
+    time_step = 0.2  # ps
+    time_interval = int(time_x / time_step)
+    # plot_trajectory_for_one_particle(
+    #     coords, particle_id=66, particle_types=classification.reshape(len(O_ids), len(frames))
+    # )
+    plot_max_displacement_over_time(coords, time_interval)
+    # plot_displacement_vecmap(
+    #     coords, classification.reshape(len(O_ids), len(frames)), time_interval=time_interval
+    # )
+    # plot_trajectories_with_type_changes(
+    #     coords, classification.reshape(len(O_ids), len(frames)), time_window=100
+    # )
+
+    # # 统计每个粒子在每个time_x下的分类变化的次数并绘制直方图
+    # change_time_counts = {}
+    # change_from_HDL_to_LDL = {}
+    # change_from_LDL_to_HDL = {}
+    # for time in range(len(frames) - time_interval):
+    #     for O_id in O_ids:
+    #         class_series = classification.reshape(len(O_ids), len(frames))[O_id]
+    #         changes = np.sum(
+    #             class_series[time + 1 : time + time_interval]
+    #             != class_series[time : time + time_interval - 1]
+    #         )
+    #         change_from_HDL_to_LDL[(time, O_id)] = np.sum(
+    #             (class_series[time + 1 : time + time_interval] == "LDL")
+    #             & (class_series[time : time + time_interval - 1] == "HDL")
+    #         )
+    #         change_from_LDL_to_HDL[(time, O_id)] = np.sum(
+    #             (class_series[time + 1 : time + time_interval] == "HDL")
+    #             & (class_series[time : time + time_interval - 1] == "LDL")
+    #         )
+    #         change_time_counts[(time, O_id)] = changes
+    #         change_from_HDL_to_LDL[(time, O_id)] = change_from_HDL_to_LDL.get((time, O_id), 0)
+    #         change_from_LDL_to_HDL[(time, O_id)] = change_from_LDL_to_HDL.get((time, O_id), 0)
+    # change_time_counts_series = pd.Series(change_time_counts)
+    # change_from_HDL_to_LDL_series = pd.Series(change_from_HDL_to_LDL)
+    # change_from_LDL_to_HDL_series = pd.Series(change_from_LDL_to_HDL)
+    # plt.figure(figsize=(10, 6))
+    # plt.hist(change_time_counts_series, bins=30, density=True, color="skyblue", edgecolor="black")
+    # plt.title(f"Distribution of Classification Changes per Particle (time_x={time_x} ps)")
+    # plt.xlabel("Number of Classification Changes")
+    # plt.ylabel("Number of Particles")
+    # plt.grid(axis="y", alpha=0.75)
+    # plt.show()
+    # plt.figure(figsize=(10, 6))
+    # plt.hist(
+    #     change_from_HDL_to_LDL_series, bins=30, density=True, color="orange", edgecolor="black"
+    # )
+    # plt.title(f"Distribution of HDL to LDL Changes per Particle (time_x={time_x} ps)")
+    # plt.xlabel("Number of HDL to LDL Changes")
+    # plt.ylabel("Number of Particles")
+    # plt.grid(axis="y", alpha=0.75)
+    # plt.show()
+    # plt.figure(figsize=(10, 6))
+    # plt.hist(change_from_LDL_to_HDL_series, bins=30, density=True, color="green", edgecolor="black")
+    # plt.title(f"Distribution of LDL to HDL Changes per Particle (time_x={time_x} ps)")
+    # plt.xlabel("Number of LDL to HDL Changes")
+    # plt.ylabel("Number of Particles")
+    # plt.grid(axis="y", alpha=0.75)
+    # plt.show()
+
+    # for O_id in O_ids:
+    #     class_series = classification[df["O_idx"] == O_id]
+    #     changes = np.sum(class_series[1:] != class_series[:-1])
+    #     change_counts[O_id] = changes
+    # change_counts_series = pd.Series(change_counts)
+    # plt.figure(figsize=(10, 6))
+    # plt.hist(change_counts_series, bins=30, color="skyblue", edgecolor="black")
+    # plt.title("Distribution of Classification Changes per Particle")
+    # plt.xlabel("Number of Classification Changes")
+    # plt.ylabel("Number of Particles")
+    # plt.grid(axis="y", alpha=0.75)
+    # # plt.savefig("/home/debian/water/TIP4P/2005/2020/rst/4096/2.5e-5/classification_changes_histogram.png")
+    # plt.show()

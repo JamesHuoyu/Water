@@ -13,21 +13,28 @@ def add_zeta_to_dump(input_file, output_file, zeta_data):
         zeta_data: 包含 zeta 值的 DataFrame，包含 'frame' 和 'O_idx' 列
     """
 
+    # start_frame_index = 2000  # 从第 3500 帧开始处理
+    start_frame_index = 9500  # 从第 9500 帧开始处理
     # 按帧分组 zeta 数据
     zeta_dict = {}
     for frame, group in zeta_data.groupby("frame"):
-        frame = 500000 + frame * 500
+        frame = frame * 200
+        # frame = 7050000 + frame * 10
         zeta_dict[frame] = dict(zip(group["O_idx"], group["distance"]))
+        # zeta_dict[frame] = dict(zip(group["O_idx"], group["hdl_prob"]))
 
     # 打开输入和输出文件
     with open(input_file, "r") as f_in, open(output_file, "w") as f_out:
         frame_count = -1
+        frame_index = -1
         n_atoms = 0
         current_frame = None
         box_lines = []
         header_line = ""
         atom_lines = []
         reading_atoms = False
+        skip_frame = False
+        frame_complete = False
 
         # 使用进度条
         total_lines = sum(1 for _ in open(input_file))
@@ -39,7 +46,12 @@ def add_zeta_to_dump(input_file, output_file, zeta_data):
 
             if line.startswith("ITEM: TIMESTEP"):
                 # 保存前一帧的数据
-                if frame_count >= 0:
+                if (
+                    frame_count >= 0
+                    and frame_complete
+                    and not skip_frame
+                    and frame_index >= start_frame_index
+                ):
                     write_frame(
                         f_out, frame_count, n_atoms, box_lines, header_line, atom_lines, zeta_dict
                     )
@@ -48,19 +60,25 @@ def add_zeta_to_dump(input_file, output_file, zeta_data):
                 frame_count = int(f_in.readline().strip())
                 pbar.update(1)
                 current_frame = frame_count
+                frame_index += 1
                 n_atoms = 0
                 box_lines = []
                 header_line = ""
                 atom_lines = []
                 reading_atoms = False
-                f_out.write(f"ITEM: TIMESTEP\n{frame_count}\n")
+                skip_frame = frame_index < start_frame_index
+                frame_complete = False
+
+                if not skip_frame:
+                    f_out.write(f"ITEM: TIMESTEP\n{frame_count}\n")
                 continue
 
             elif line.startswith("ITEM: NUMBER OF ATOMS"):
                 n_atoms_line = f_in.readline().strip()
                 pbar.update(1)
                 n_atoms = int(n_atoms_line)
-                f_out.write(f"ITEM: NUMBER OF ATOMS\n{n_atoms}\n")
+                if not skip_frame:
+                    f_out.write(f"ITEM: NUMBER OF ATOMS\n{n_atoms}\n")
                 continue
 
             elif line.startswith("ITEM: BOX BOUNDS"):
@@ -75,27 +93,39 @@ def add_zeta_to_dump(input_file, output_file, zeta_data):
             elif line.startswith("ITEM: ATOMS"):
                 header_line = line
                 reading_atoms = True
-                # 添加 zeta 列到头部
-                new_header = header_line + " zeta\n"
-                f_out.write(new_header)
                 continue
 
             elif reading_atoms:
                 # 收集原子行
                 atom_lines.append(line)
                 if len(atom_lines) == n_atoms:
-                    # 处理完整的一帧
-                    write_frame(
-                        f_out, current_frame, n_atoms, box_lines, header_line, atom_lines, zeta_dict
-                    )
+                    # # 处理完整的一帧
+                    # if not skip_frame:
+                    #     write_frame(
+                    #         f_out,
+                    #         current_frame,
+                    #         n_atoms,
+                    #         box_lines,
+                    #         header_line,
+                    #         atom_lines,
+                    #         zeta_dict,
+                    #     )
+                    # atom_lines = []
+                    frame_complete = True
                     reading_atoms = False
                 continue
 
-            # 写入其他行
-            f_out.write(line + "\n")
+            # # 写入其他行
+            # elif not skip_frame and frame_index >= start_frame_index:
+            #     f_out.write(line + "\n")
 
         # 处理最后一帧
-        if frame_count >= 0 and atom_lines:
+        if (
+            frame_count >= 0
+            and frame_complete
+            and not skip_frame
+            and frame_index >= start_frame_index
+        ):
             write_frame(f_out, frame_count, n_atoms, box_lines, header_line, atom_lines, zeta_dict)
 
         pbar.close()
@@ -106,6 +136,8 @@ def write_frame(f_out, frame, n_atoms, box_lines, header_line, atom_lines, zeta_
     # 写入盒子信息
     f_out.writelines(box_lines)
 
+    new_header = header_line + " zeta\n"
+    f_out.write(new_header)
     # 获取当前帧的 zeta 值
     frame_zeta = zeta_dict.get(frame, {})
 
@@ -115,7 +147,7 @@ def write_frame(f_out, frame, n_atoms, box_lines, header_line, atom_lines, zeta_
         atom_id = int(parts[0])
 
         # 添加 zeta 值（默认为0）
-        zeta_value = frame_zeta.get(atom_id, 0.0)
+        zeta_value = frame_zeta.get(atom_id - 1, 0.0)
 
         # 写入新行
         new_line = line + f" {zeta_value}\n"
@@ -125,15 +157,16 @@ def write_frame(f_out, frame, n_atoms, box_lines, header_line, atom_lines, zeta_
 # 示例使用
 if __name__ == "__main__":
     # 原始轨迹文件
-    input_dump = "/home/debian/water/TIP4P/2005/2020/4096/traj_2.5e-5_246.lammpstrj"
+    input_dump = "/home/debian/water/TIP4P/2005/2020/dump_H2O_225.lammpstrj"
 
     # 输出文件
-    output_dump = "classified_2.5e-5_246_with_zeta.lammpstrj"
+    output_dump = "/home/debian/water/TIP4P/2005/2020/rst/classified_equili_with_zeta_cg.lammpstrj"
 
     # 加载 zeta 数据
-    zeta_data = pd.read_csv("/home/debian/water/TIP4P/2005/2020/rst/4096/2.5e-5/zeta.csv")
+    zeta_data = pd.read_csv("/home/debian/water/TIP4P/2005/2020/rst/equili/zeta_cg_L1.csv")
 
     # 添加 zeta 属性
     add_zeta_to_dump(input_dump, output_dump, zeta_data)
 
     print(f"处理完成！输出文件: {output_dump}")
+    print(f"文件大小: {os.path.getsize(output_dump) / (1024 * 1024):.2f} MB")

@@ -10,7 +10,13 @@ from numba import jit, prange
 
 
 class ISFCalculator:
-    def __init__(self, universe: Universe, shear_rate: float = 0.0, time_step: float = 1.0):
+    def __init__(
+        self,
+        universe: Universe,
+        shear_rate: float = 0.0,
+        time_step: float = 1.0,
+        start_index: int = 0,
+    ):
         """
         初始化ISF计算器
         :param universe: MDAnalysis Universe对象
@@ -19,17 +25,17 @@ class ISFCalculator:
         self.n_frames = len(universe.trajectory)
         self.n_particles = len(universe.atoms)
         self.O_atoms = self.universe.select_atoms("type 1")
-
+        self.frames = self.n_frames - start_index
         # 预加载轨迹数据到内存，只针对O原子
-        self.coords = np.zeros((self.n_frames, len(self.O_atoms), 3))
-        for ts in tqdm(self.universe.trajectory, desc="Loading trajectory"):
-            self.coords[ts.frame] = self.O_atoms.positions.copy()
+        self.coords = np.zeros((self.frames, len(self.O_atoms), 3))
+        for ts in tqdm(self.universe.trajectory[start_index:], desc="Loading trajectory"):
+            self.coords[ts.frame - start_index] = self.O_atoms.positions.copy()
         # 应用剪切流修正
         if shear_rate != 0.0:
             self.shear_correction(shear_rate, time_step)
 
     def shear_correction(self, shear_rate, time_step):
-        for frame in tqdm(range(self.n_frames), desc="Applying shear correction"):
+        for frame in tqdm(range(self.frames), desc="Applying shear correction"):
             if frame == 0:
                 continue
             y_positions = self.coords[frame - 1, :, 1]
@@ -65,7 +71,7 @@ class ISFCalculator:
 
     def compute_isf_for_origin(self, t0: int, q_vectors: np.ndarray) -> np.ndarray:
         return self.compute_phases_numba(
-            self.coords, t0, q_vectors, self.n_frames - t0, len(self.O_atoms), q_vectors.shape[0]
+            self.coords, t0, q_vectors, self.frames - t0, len(self.O_atoms), q_vectors.shape[0]
         )
 
     def time_origin_average(self, q_vectors: np.ndarray, max_tau: int = None) -> np.ndarray:
@@ -75,12 +81,12 @@ class ISFCalculator:
         :param max_tau: 最大时间延迟（可选）
         :return: 平均ISF (n_q, max_tau)
         """
-        max_tau = max_tau or self.n_frames
+        max_tau = max_tau or self.frames
         n_q = q_vectors.shape[0]
         isf_accum = np.zeros((n_q, max_tau))
         count = np.zeros(max_tau, dtype=int)
 
-        for t0 in tqdm(range(self.n_frames), desc="Computing ISF"):
+        for t0 in tqdm(range(self.frames), desc="Computing ISF"):
             isf_t0 = self.compute_isf_for_origin(t0, q_vectors)
             valid_tau = min(isf_t0.shape[1], max_tau)
 
@@ -99,21 +105,22 @@ class ISFCalculator:
 if __name__ == "__main__":
     # 创建Universe对象（需提供拓扑和轨迹文件）
     # pathfiles = [
-    # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-4_246.lammpstrj",
-    # "/home/debian/water/TIP4P/2005/2020/4096/traj_2.5e-5_246.lammpstrj",
-    # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-6_246.lammpstrj",
-    # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_5e-6_246.lammpstrj",
-    # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_5e-7_246.lammpstrj",
+    #     "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-4_246.lammpstrj",
+    #     "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_7.5e-5_246.lammpstrj",
+    #     "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-5_246.lammpstrj",
+    #     "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_1e-5_246.lammpstrj",
     # ]
-    pathfiles = ["/home/debian/water/TIP4P/2005/2020/4096/traj_2.5e-4_246_everystep.lammpstrj"]
-    # pathfiles = ["/home/debian/water/TIP4P/2005/dump_H2O_246_10.lammpstrj"]
-    output_h5 = "test_isf_results.h5"
+    # pathfiles = ["/home/debian/water/TIP4P/2005/2020/4096/traj_2.5e-4_246_everystep.lammpstrj"]
+    pathfiles = ["/home/debian/water/TIP4P/2005/2020/dump_H2O_225.lammpstrj"]
+    # output_h5 = "test_isf_results.h5"
+    output_h5 = "/home/debian/water/TIP4P/2005/2020/rst/new_isf_results.h5"
     store = pd.HDFStore(output_h5)
     for pathfile in pathfiles:
         u = Universe(pathfile, format="LAMMPSDUMP")
-
+        # start_index = 2000  # 跳过前2000帧以避免初始非平衡影响
+        start_index = 0  # 从头开始计算
         # 初始化计算器
-        isf_calculator = ISFCalculator(u)
+        isf_calculator = ISFCalculator(u, start_index=start_index)
 
         # 定义q矢量（沿z方向的q矢量,垂直于xy平面，不受剪切流影响）
         q_magnitude = 2.7  # Å⁻¹
@@ -121,14 +128,15 @@ if __name__ == "__main__":
 
         # 计算时间原点平均的ISF
         isf = isf_calculator.time_origin_average(q_vectors)
-        time_steps = 0.001  # ps
+        # time_steps = 0.05  # ps
+        time_steps = 0.2  # ps
         times = np.arange(isf.shape[1]) * time_steps
 
         # 结果处理（保存）
         df = pd.DataFrame({"time_ps": times, "ISF": isf[0]})
         filename = pathfile.split("/")[-1].replace(".lammpstrj", "_isf.csv")
         # key = filename.split("_")[1]  # 对应的是剪切率部分例如"2.5e-5"
-        key = "2.5e-4-everystep"  # 固定key以便对比
+        key = "equili"  # 固定key以便对比
         store.put(key, df)
         print(f"ISF results saved to {output_h5} under key '{key}'")
     store.close()

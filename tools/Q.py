@@ -9,7 +9,7 @@ import pandas as pd
 from numba import jit, prange
 
 
-class Chi4Calculator:
+class QCalculator:
     def __init__(
         self,
         universe: mda.Universe,
@@ -42,7 +42,6 @@ class Chi4Calculator:
     def _compute_overlap_numba(coords, t0, max_tau, n_particles, a=1.0):
         n_tau = min(coords.shape[0] - t0, max_tau)
         Q_t0 = np.zeros(n_tau)
-        Q2_t0 = np.zeros(n_tau)
         ref_pos = coords[t0]
 
         for tau in prange(n_tau):
@@ -51,9 +50,8 @@ class Chi4Calculator:
             dist = np.sqrt(np.sum(dr**2, axis=1))  # shape(n_particles,)
             overlap = np.sum(dist <= a) / n_particles
             Q_t0[tau] = overlap
-            Q2_t0[tau] = overlap**2
 
-        return Q_t0, Q2_t0
+        return Q_t0
 
     def compute_overlap_for_origin(self, t0: int):
         return self._compute_overlap_numba(
@@ -63,62 +61,57 @@ class Chi4Calculator:
     def time_origin_average(self, max_tau: int = None) -> np.ndarray:
         max_tau = max_tau or self.frames
         Q_accum = np.zeros(max_tau)
-        Q2_accum = np.zeros(max_tau)
         count = np.zeros(max_tau, dtype=int)
 
-        for t0 in tqdm(range(self.frames), desc="Calculating chi4"):
-            Q_t0, Q2_t0 = self.compute_overlap_for_origin(t0)
+        for t0 in tqdm(range(self.frames), desc="Calculating Q(t)"):
+            Q_t0 = self.compute_overlap_for_origin(t0)
             valid_tau = min(len(Q_t0), max_tau)
 
             Q_accum[:valid_tau] += Q_t0[:valid_tau]
-            Q2_accum[:valid_tau] += Q2_t0[:valid_tau]
             count[:valid_tau] += 1
 
         # 平均化
         valid_mask = count > 0
         Q_accum[valid_mask] /= count[valid_mask]
-        Q2_accum[valid_mask] /= count[valid_mask]
 
-        # 计算chi4
-        chi4_values = np.zeros_like(Q_accum)
-        chi4_values[valid_mask] = (Q2_accum[valid_mask] - Q_accum[valid_mask] ** 2) * (
-            self.n_particles
-        )
+        return Q_accum
 
-        return chi4_values
+    def compute_Q(self, max_tau: int = None) -> np.ndarray:
+        return self.time_origin_average(max_tau=max_tau)
 
 
 if __name__ == "__main__":
     pathfiles = [
+        "/home/debian/water/TIP4P/2005/2020/dump_H2O_225.lammpstrj",
         # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-5_246.lammpstrj",
-        "/home/debian/water/TIP4P/2005/nvt/dump_225_test.lammpstrj",
+        # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_7.5e-5_246.lammpstrj",
+        # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_1e-5_246.lammpstrj",
+        # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-4_246.lammpstrj",
     ]
-    output_h5 = "/home/debian/water/TIP4P/2005/nvt/rst/chi4_results.h5"
-    # output_h5 = "/home/debian/water/TIP4P/2005/Tanaka_2018/rst/equili_chi4_results.h5"
+    output_h5 = "/home/debian/water/TIP4P/2005/2020/rst/new_Q_results.h5"
 
     store = pd.HDFStore(output_h5)
 
     # start_index = 2000  # 跳过前2000帧以避免初始非平衡影响
-    # start_index = 25000
-    start_index = 0  # 不跳过任何帧
+    start_index = 7000  # 跳过前7000帧以避免初始非平衡影响
 
     for pathfile in pathfiles:
         # time_step = 0.05  # ps
-        # time_step = 0.02  # 20fs
-        # time_step = 0.002  # 2fs
-        time_step = 0.2  # 200fs
+        time_step = 0.2  # ps
         u = mda.Universe(pathfile, format="LAMMPSDUMP")
-        # chi4_calculator = Chi4Calculator(
-        #     u, shear_rate=2.5e-2, time_step=time_step, start_index=start_index
-        # )  # shear_rate in 1/ps(7.5e-2 1/fs)
-        chi4_calculator = Chi4Calculator(u, start_index=start_index)  # 无剪切流
-        chi4_values = chi4_calculator.time_origin_average()
-        times = np.arange(len(chi4_values)) * time_step
+        # shear_rate = float(pathfile.split("traj_")[-1].split("_246")[0])  # 从文件名中提取剪切率
+        # shear_rate *= 1e3  # 转换为1/ps单位
+        shear_rate = 0.0  # 1/ps
+        Q_calculator = QCalculator(
+            u, shear_rate=shear_rate, time_step=time_step, start_index=start_index
+        )  # shear_rate in 1/ps(7.5e-2 1/fs)
+        Q = Q_calculator.compute_Q()
+        times = np.arange(len(Q)) * time_step
 
-        df = pd.DataFrame({"time_ps": times, "chi4": chi4_values})
+        df = pd.DataFrame({"time_ps": times, "Q": Q})
         # filename = pathfile.split("traj_")[-1].split("_246")[0]
         filename = "equili"
         store.put(filename, df, format="table")
-        print(f"Saved chi4 results to {output_h5} under key {filename}")
+        print(f"Saved Q results to {output_h5} under key {filename}")
     store.close()
-    print("All chi4 calculations completed.")
+    print("All Q calculations completed.")

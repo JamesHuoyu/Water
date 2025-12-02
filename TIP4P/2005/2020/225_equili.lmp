@@ -1,0 +1,43 @@
+units real
+atom_style full
+boundary p p p
+
+pair_style lj/cut/tip4p/long 1 2 1 1 0.1546 9.5
+bond_style zero
+angle_style zero
+pair_modify tail yes
+
+read_data /home/debian/water/TIP4P/2005/2020/data_225.data
+print "Equilibrium configuration loaded from NPT run"
+
+kspace_style pppm/tip4p 1.0e-5
+pair_coeff 1 1 0.18521 3.1589 #O-O
+pair_coeff * 2 0.0 0.0 #O-H/H-H
+bond_coeff 1 0.9572 #O-H
+angle_coeff 1 104.52 #H-O-H
+
+group gH2O type 1 2
+group gO type 1
+
+neighbor 3.0 bin
+neigh_modify delay 0 every 1 check yes
+
+timestep 1.0
+fix 1 gH2O shake 1.0e-4 100 0 b 1 a 1
+
+
+variable massAll equal mass(all)/6.022e23
+variable volCm3 equal vol*1.0e-24
+variable density_sys equal v_massAll/v_volCm3
+variable tmp equal temp
+
+
+thermo 1000
+thermo_style custom step temp vol etotal pe lx v_density_sys 
+thermo_modify flush yes
+
+fix fnpt all npt temp 225.0 225.0 100.0 iso 0.9869 0.9869 1000.0
+dump dH2O gH2O custom 200 dump_H2O_225.lammpstrj id type xu yu zu # 间隔0.2ps采样
+dump_modify dH2O sort id
+run 2000000 # 2ns
+undump dH2O

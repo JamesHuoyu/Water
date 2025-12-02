@@ -1,0 +1,49 @@
+units real
+atom_style full
+boundary p p p
+
+package intel 1 omp 2
+
+
+pair_style lj/cut/tip4p/long 1 2 1 1 0.1577 9.5
+bond_style zero
+angle_style zero
+pair_modify tail yes
+
+read_data /home/debian/water/TIP4P/Ice/225/tip4p-ice-225K.data
+
+kspace_style pppm/tip4p 1.0e-5
+
+pair_coeff 1 1 0.21084 3.1688
+pair_coeff 2 2 0.0    1.0
+
+bond_coeff 1 0.9572
+
+angle_coeff 1 104.52
+
+group gH2O type 1 2
+group gO type 1
+
+neighbor 3.0 bin
+neigh_modify delay 0 every 1 check yes
+
+timestep 1.0
+fix rigid all shake 0.001 10 100000 b 1 a 1
+
+variable massAll equal mass(all)/6.022e23
+variable volCm3 equal vol*1.0e-24
+variable density_sys equal v_massAll/v_volCm3
+variable tmp equal temp
+
+thermo 1000
+thermo_style custom step temp vol etotal pe lx v_density_sys
+thermo_modify flush yes
+
+# velocity all create 225.0 4928459 rot yes dist gaussian
+
+fix fnvt all nvt temp 225.0 225.0 100.0
+# dump 1 all custom 200 dump_225_test.lammpstrj id type xu yu zu # 间隔0.2ps采样
+# dump_modify 1 sort id
+# run 200000 # 200ps
+run 2000000 # 2ns
+write_data tip4p-ice-225K.data pair ij

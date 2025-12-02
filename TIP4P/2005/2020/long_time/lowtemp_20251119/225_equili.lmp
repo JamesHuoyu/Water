@@ -1,0 +1,41 @@
+units real
+atom_style full
+boundary p p p
+
+pair_style lj/cut/tip4p/long 1 2 1 1 0.1546 9.5
+bond_style zero
+angle_style zero
+pair_modify tail yes
+
+read_data data_225.data
+print "Equilibrium configuration loaded from NPT run"
+
+kspace_style pppm/tip4p 1.0e-5
+pair_coeff 1 1 0.18521 3.1589 #O-O
+pair_coeff * 2 0.0 0.0 #O-H/H-H
+bond_coeff 1 0.9572 #O-H
+angle_coeff 1 104.52 #H-O-H
+
+group gH2O type 1 2
+group gO type 1
+
+neighbor 3.0 bin
+neigh_modify delay 0 every 1 check yes
+
+timestep 1.0
+fix 1 all shake 1.0e-4 100 0 b 1 a 1
+
+thermo 1000
+thermo_style custom step temp vol etotal pe lx 
+thermo_modify flush yes
+
+fix fnpt all npt temp 225.0 225.0 100.0 iso 0.9869 0.9869 1000.0
+run 7000000 # 7ns
+print "NPT run completed"
+unfix fnpt
+
+fix fnpt all npt temp 225.0 225.0 100.0 iso 0.9869 0.9869 1000.0
+dump dH2O gH2O custom 200 dump_H2O_225_short.lammpstrj id type xu yu zu # 间隔0.2ps采样
+dump_modify dH2O sort id
+run 1000000 # 1ns
+undump dH2O
