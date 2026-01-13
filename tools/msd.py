@@ -105,7 +105,7 @@ if __name__ == "__main__":
 
         df = pd.DataFrame({"time_ps": times, "MSD_A2": msd})
         filename = pathfile.split("traj_")[-1].split("_225")[0]
-        filename = filename.join("-y")
+        filename = f"{filename}-y"
         # filename = "equili"
         store.put(filename, df, format="table")
         print(f"Saved MSD results to key: {filename}")
