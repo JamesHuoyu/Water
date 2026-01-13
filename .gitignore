@@ -14,3 +14,15 @@ tmp.*
 *.zip
 *.tar.gz
 *.h5
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.ipynb_checkpoints/
+*.npz
+*.hdf5
+*.tar
+*.gz
+*.zip
+
