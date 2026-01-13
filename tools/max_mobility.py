@@ -77,16 +77,16 @@ if __name__ == "__main__":
     # output_h5 = "test_msd_results.h5"
     store = pd.HDFStore(output_h5)
 
-    start_index = 2000  # 跳过前2000帧以避免初始非平衡影响
-    t_x = 3.0  # ps
+    start_index = 0  # 跳过前2000帧以避免初始非平衡影响
+    t_x = 38.0  # ps
     for pathfile in pathfiles:
-        time_step = 0.05  # ps
+        time_step = 0.2  # ps
         target_frame = int(t_x / time_step)
         u = mda.Universe(pathfile, format="LAMMPSDUMP")
-        mobility_calculator = MaxMobilityCalculator(
-            u, shear_rate=2.5e-2, time_step=time_step
-        )  # shear_rate in 1/ps(2.5e-5 1/fs)
-        # msd_calculator = MSDCalculator(u, start_index=start_index)  # 无剪切流
+        # mobility_calculator = MaxMobilityCalculator(
+        #     u, shear_rate=2.5e-2, time_step=time_step
+        # )  # shear_rate in 1/ps(2.5e-5 1/fs)
+        mobility_calculator = MaxMobilityCalculator(u, start_index=start_index)  # 无剪切流
         disp, dist = mobility_calculator.time_origin_average(target_frame)
         times = np.arange(len(dist)) * time_step
         idx = np.arange(len(dist))

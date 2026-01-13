@@ -31,7 +31,12 @@ def plot_chi(filepath: str, key: str, start_time: bool = True):
 
 # 示例使用
 plt.figure(figsize=(7, 5))
-plot_chi("/home/debian/water/TIP4P/2005/nvt/rst/chi4_results.h5", "equili")
+# plot_chi("/home/debian/water/TIP4P/2005/nvt/rst/chi4_results.h5", "equili")
+plot_chi("/home/debian/water/TIP4P/Ice/225/shear/rst/chi4_results.h5", "1e-6")
+plot_chi("/home/debian/water/TIP4P/Ice/225/shear/rst/chi4_results.h5", "5e-6")
+plot_chi("/home/debian/water/TIP4P/Ice/225/shear/rst/chi4_results.h5", "5e-5")
+plot_chi("/home/debian/water/TIP4P/Ice/225/shear/rst/chi4_results.h5", "1e-4")
+plot_chi("/home/debian/water/TIP4P/Ice/225/shear/rst/chi4_results.h5", "5e-4")
 # plot_chi("/home/debian/water/TIP4P/2005/2020/rst/4096/new_chi4_results.h5", "246-equili-everystep")
 # plot_chi("/home/debian/water/TIP4P/2005/2020/rst/4096/new_chi4_results.h5", "1e-5")
 # plot_chi("/home/debian/water/TIP4P/2005/2020/rst/4096/new_chi4_results.h5", "2.5e-5")

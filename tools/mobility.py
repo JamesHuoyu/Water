@@ -219,7 +219,7 @@ def plot_multiple_views(zeta_cg, coords):
             heatmap = ndimage.gaussian_filter(heatmap, sigma=sigma)
 
         if enhance:
-            cmap = create_enhanced_colormap(0.05, 0.02, vmin, vmax)
+            cmap = create_enhanced_colormap(0.43, 0.3, vmin, vmax)
         else:
             cmap = cmap_name
 
@@ -280,8 +280,8 @@ if __name__ == "__main__":
     plot_enhanced_heatmap(
         zeta_cg[:idx, -1],
         coords_reshaped[:idx, :2],
-        peak_center=0.05,
-        peak_width=0.02,
+        peak_center=0.43,
+        peak_width=0.3,
         enhance_contrast=True,
     )
 

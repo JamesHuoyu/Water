@@ -82,26 +82,26 @@ class QCalculator:
 
 if __name__ == "__main__":
     pathfiles = [
-        "/home/debian/water/TIP4P/2005/2020/dump_H2O_225.lammpstrj",
-        # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-5_246.lammpstrj",
-        # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_7.5e-5_246.lammpstrj",
-        # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_1e-5_246.lammpstrj",
-        # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-4_246.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/225/shear/traj_1e-6_225.0.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-6_225.0.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-5_225.0.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/225/shear/traj_1e-4_225.0.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-4_225.0.lammpstrj",
     ]
-    output_h5 = "/home/debian/water/TIP4P/2005/2020/rst/new_Q_results.h5"
+    output_h5 = "/home/debian/water/TIP4P/Ice/225/shear/rst/Q_results.h5"
 
     store = pd.HDFStore(output_h5)
 
     # start_index = 2000  # 跳过前2000帧以避免初始非平衡影响
-    start_index = 7000  # 跳过前7000帧以避免初始非平衡影响
+    start_index = 1500  # 跳过前7000帧以避免初始非平衡影响
 
     for pathfile in pathfiles:
         # time_step = 0.05  # ps
         time_step = 0.2  # ps
         u = mda.Universe(pathfile, format="LAMMPSDUMP")
-        # shear_rate = float(pathfile.split("traj_")[-1].split("_246")[0])  # 从文件名中提取剪切率
-        # shear_rate *= 1e3  # 转换为1/ps单位
-        shear_rate = 0.0  # 1/ps
+        shear_rate = float(pathfile.split("traj_")[-1].split("_225")[0])  # 从文件名中提取剪切率
+        shear_rate *= 1e3  # 转换为1/ps单位
+        # shear_rate = 0.0  # 1/ps
         Q_calculator = QCalculator(
             u, shear_rate=shear_rate, time_step=time_step, start_index=start_index
         )  # shear_rate in 1/ps(7.5e-2 1/fs)
@@ -109,8 +109,8 @@ if __name__ == "__main__":
         times = np.arange(len(Q)) * time_step
 
         df = pd.DataFrame({"time_ps": times, "Q": Q})
-        # filename = pathfile.split("traj_")[-1].split("_246")[0]
-        filename = "equili"
+        filename = pathfile.split("traj_")[-1].split("_225")[0]
+        # filename = "equili"
         store.put(filename, df, format="table")
         print(f"Saved Q results to {output_h5} under key {filename}")
     store.close()

@@ -29,13 +29,12 @@ class Chi4Calculator:
         if shear_rate != 0.0:
             self.shear_correction(shear_rate, time_step)
 
-    def shear_correction(self, shear_rate, time_step):
-        for frame in tqdm(range(self.frames), desc="Applying shear correction"):
-            if frame == 0:
-                continue
-            y_positions = self.coords[frame - 1, :, 1]
-            # 修正x坐标以消除剪切流影响
-            self.coords[frame:, :, 0] -= shear_rate * time_step * y_positions
+    def shear_correction(self, shear_rate, time_step, ref_y: float = 25.0):
+        T = self.coords.shape[0]
+        y = self.coords[:, :, 1] - ref_y  # shape (T, N)
+        gamma_dt = shear_rate * time_step
+        shear_disp = gamma_dt * np.cumsum(y, axis=0)  # shape (T, N)
+        self.coords[:, :, 0] -= shear_disp
 
     @staticmethod
     @jit(nopython=True, parallel=True, fastmath=True)
@@ -90,34 +89,40 @@ class Chi4Calculator:
 
 if __name__ == "__main__":
     pathfiles = [
-        # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-5_246.lammpstrj",
-        "/home/debian/water/TIP4P/2005/nvt/dump_225_test.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/225/shear/traj_1e-6_225.0.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-6_225.0_new.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-5_225.0_new.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/225/shear/traj_1e-4_225.0_new.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-4_225.0.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/225/dump_225_test.lammpstrj"
     ]
-    output_h5 = "/home/debian/water/TIP4P/2005/nvt/rst/chi4_results.h5"
+    output_h5 = "/home/debian/water/TIP4P/Ice/225/shear/rst/chi4_results.h5"
     # output_h5 = "/home/debian/water/TIP4P/2005/Tanaka_2018/rst/equili_chi4_results.h5"
 
     store = pd.HDFStore(output_h5)
 
-    # start_index = 2000  # 跳过前2000帧以避免初始非平衡影响
+    start_index = 3000  # 跳过前1500帧以避免初始非平衡影响
     # start_index = 25000
-    start_index = 0  # 不跳过任何帧
+    # start_index = 0  # 不跳过任何帧
 
     for pathfile in pathfiles:
         # time_step = 0.05  # ps
         # time_step = 0.02  # 20fs
         # time_step = 0.002  # 2fs
-        time_step = 0.2  # 200fs
+        time_step = 0.05  # 50fs
         u = mda.Universe(pathfile, format="LAMMPSDUMP")
-        # chi4_calculator = Chi4Calculator(
-        #     u, shear_rate=2.5e-2, time_step=time_step, start_index=start_index
-        # )  # shear_rate in 1/ps(7.5e-2 1/fs)
-        chi4_calculator = Chi4Calculator(u, start_index=start_index)  # 无剪切流
+        shear_rate = float(pathfile.split("traj_")[-1].split("_225")[0]) * 1e3
+        # print(f"shear_rate extracted: {shear_rate} 1/ps")
+        chi4_calculator = Chi4Calculator(
+            u, shear_rate=shear_rate, time_step=time_step, start_index=start_index
+        )  # shear_rate in 1/ps(7.5e-2 1/fs)
+        # chi4_calculator = Chi4Calculator(u, start_index=start_index)  # 无剪切流
         chi4_values = chi4_calculator.time_origin_average()
         times = np.arange(len(chi4_values)) * time_step
 
         df = pd.DataFrame({"time_ps": times, "chi4": chi4_values})
-        # filename = pathfile.split("traj_")[-1].split("_246")[0]
-        filename = "equili"
+        filename = pathfile.split("traj_")[-1].split("_225")[0]
+        # filename = "equili"
         store.put(filename, df, format="table")
         print(f"Saved chi4 results to {output_h5} under key {filename}")
     store.close()

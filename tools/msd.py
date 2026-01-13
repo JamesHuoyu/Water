@@ -24,15 +24,14 @@ class MSDCalculator:
         for ts in tqdm(self.universe.trajectory[start_index:], desc="Loading trajectory data"):
             self.coords[ts.frame - start_index] = self.O_atoms.positions.copy()
         if shear_rate != 0.0:
-            self.shear_correction(shear_rate, time_step)
+            self.shear_correction(shear_rate, time_step, ref_y=25.0)
 
-    def shear_correction(self, shear_rate, time_step):
-        for frame in tqdm(range(self.frames), desc="Applying shear correction"):
-            if frame == 0:
-                continue
-            y_positions = self.coords[frame - 1, :, 1]
-            # 修正x坐标以消除剪切流影响
-            self.coords[frame:, :, 0] -= shear_rate * time_step * y_positions
+    def shear_correction(self, shear_rate, time_step, ref_y: float = 25.0):
+        T = self.coords.shape[0]
+        y = self.coords[:, :, 1] - ref_y  # shape (T, N)
+        gamma_dt = shear_rate * time_step
+        shear_disp = gamma_dt * np.cumsum(y, axis=0)  # shape (T, N)
+        self.coords[:, :, 0] -= shear_disp
 
     @staticmethod
     @jit(nopython=True, parallel=True, fastmath=True)
@@ -52,8 +51,8 @@ class MSDCalculator:
         return msd_t0
 
     def compute_msd_for_origin(self, t0: int) -> np.ndarray:
-        # 计算x方向的MSD
-        return self.compute_msd_numba(self.coords[:, :, 0], t0, self.frames - t0, len(self.O_atoms))
+        # 计算z方向的MSD
+        return self.compute_msd_numba(self.coords[:, :, 1], t0, self.frames - t0, len(self.O_atoms))
 
     def time_origin_average(self, max_tau: int = None) -> np.ndarray:
         if max_tau is None:
@@ -75,35 +74,39 @@ class MSDCalculator:
 
 
 if __name__ == "__main__":
-    # pathfiles = [
-    # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-4_246.lammpstrj",
-    # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_7.5e-5_246.lammpstrj",
-    # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-5_246.lammpstrj",
-    # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_1e-5_246.lammpstrj",
-    # ]
-    pathfiles = ["/home/debian/water/TIP4P/2005/nvt/shear/traj_1e-7_225.0.lammpstrj"]
-    # pathfiles = ["/home/debian/water/TIP4P/2005/dump_H2O_246_10.lammpstrj"]
-    output_h5 = "/home/debian/water/TIP4P/2005/nvt/rst/msd_results.h5"
+    pathfiles = [
+        # "/home/debian/water/TIP4P/Ice/225/shear/traj_1e-6_225.0.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-6_225.0_new.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-5_225.0_new.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/225/shear/traj_1e-4_225.0_new.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-4_225.0.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/225/shear/rst/5e-4/traj_1e-6_225.0_new.lammpstrj"
+        # "/home/debian/water/TIP4P/Ice/225/dump_225_test.lammpstrj",
+    ]
+    output_h5 = "/home/debian/water/TIP4P/Ice/225/shear/rst/msd_results.h5"
     # output_h5 = "test_msd_results.h5"
     store = pd.HDFStore(output_h5)
 
-    start_index = 2000  # 跳过前2000帧以避免初始非平衡影响
+    start_index = 3000  # 跳过前1500帧以避免初始非平衡影响
     # start_index = 0
 
     for pathfile in pathfiles:
-        time_step = 0.2  # ps
+        time_step = 0.05  # ps
         u = mda.Universe(pathfile, format="LAMMPSDUMP")
+        shear_rate = float(pathfile.split("traj_")[-1].split("_225")[0]) * 1e3
+        # shear_rate = 0
+        print(f"shear_rate extracted: {shear_rate} 1/ps")
         msd_calculator = MSDCalculator(
-            u, shear_rate=1e-4, time_step=time_step
+            u, shear_rate=shear_rate, time_step=time_step, start_index=start_index
         )  # shear_rate in 1/ps(1e-7 1/fs)
-        msd_calculator = MSDCalculator(u, start_index=start_index)  # 无剪切流
+        # msd_calculator = MSDCalculator(u, start_index=start_index)  # 无剪切流
         msd = msd_calculator.time_origin_average()
         times = np.arange(len(msd)) * time_step
 
         df = pd.DataFrame({"time_ps": times, "MSD_A2": msd})
-        # filename = pathfile.split("traj_")[-1].split("_225")[0]
-        filename = "1e-7-x"
-        # filename = "equili_test"
+        filename = pathfile.split("traj_")[-1].split("_225")[0]
+        filename = filename.join("-y")
+        # filename = "equili"
         store.put(filename, df, format="table")
         print(f"Saved MSD results to key: {filename}")
     store.close()

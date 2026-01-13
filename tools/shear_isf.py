@@ -111,9 +111,9 @@ if __name__ == "__main__":
     #     "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_1e-5_246.lammpstrj",
     # ]
     # pathfiles = ["/home/debian/water/TIP4P/2005/2020/4096/traj_2.5e-4_246_everystep.lammpstrj"]
-    pathfiles = ["/home/debian/water/TIP4P/2005/2020/dump_H2O_225.lammpstrj"]
+    pathfiles = ["/home/debian/water/TIP4P/Ice/225/dump_225_test.lammpstrj"]
     # output_h5 = "test_isf_results.h5"
-    output_h5 = "/home/debian/water/TIP4P/2005/2020/rst/new_isf_results.h5"
+    output_h5 = "/home/debian/water/TIP4P/Ice/225/shear/isf_results.h5"
     store = pd.HDFStore(output_h5)
     for pathfile in pathfiles:
         u = Universe(pathfile, format="LAMMPSDUMP")

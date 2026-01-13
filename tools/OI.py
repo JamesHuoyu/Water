@@ -14,13 +14,15 @@ def add_zeta_to_dump(input_file, output_file, zeta_data):
     """
 
     # start_frame_index = 2000  # 从第 3500 帧开始处理
-    start_frame_index = 9500  # 从第 9500 帧开始处理
+    start_frame_index = 0  # 从第 0 帧开始处理
     # 按帧分组 zeta 数据
     zeta_dict = {}
     for frame, group in zeta_data.groupby("frame"):
         frame = frame * 200
         # frame = 7050000 + frame * 10
-        zeta_dict[frame] = dict(zip(group["O_idx"], group["distance"]))
+        zeta_dict[frame] = dict(
+            zip(group["O_idx"], group["distance"].apply(lambda x: 0 if x < 0.43 else 1))
+        )
         # zeta_dict[frame] = dict(zip(group["O_idx"], group["hdl_prob"]))
 
     # 打开输入和输出文件
@@ -157,13 +159,18 @@ def write_frame(f_out, frame, n_atoms, box_lines, header_line, atom_lines, zeta_
 # 示例使用
 if __name__ == "__main__":
     # 原始轨迹文件
-    input_dump = "/home/debian/water/TIP4P/2005/2020/dump_H2O_225.lammpstrj"
+    input_dump = "/home/debian/water/TIP4P/2005/nvt/dump_225_test.lammpstrj"
 
     # 输出文件
-    output_dump = "/home/debian/water/TIP4P/2005/2020/rst/classified_equili_with_zeta_cg.lammpstrj"
+    output_dump = "/home/debian/water/TIP4P/2005/nvt/rst/classified_equili_with_zeta_cg.lammpstrj"
 
     # 加载 zeta 数据
-    zeta_data = pd.read_csv("/home/debian/water/TIP4P/2005/2020/rst/equili/zeta_cg_L1.csv")
+    zeta_data = pd.read_csv(
+        "/home/debian/water/TIP4P/2005/nvt/rst/equili/zeta_cg.csv",
+        names=["frame", "O_idx", "distance"],
+        header=0,
+    )
+    print(zeta_data.head())
 
     # 添加 zeta 属性
     add_zeta_to_dump(input_dump, output_dump, zeta_data)

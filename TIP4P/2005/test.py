@@ -4,36 +4,78 @@ import MDAnalysis as mda
 from MDAnalysis.analysis.hydrogenbonds.hbond_analysis import HydrogenBondAnalysis as HBA
 from collections import defaultdict
 
-txt_file = "/home/debian/water/TIP4P/2005/nvt/shear/stress_5e-5_225.0.data"
-step, strain, stress = np.loadtxt(txt_file, comments="#", unpack=True)
-strain_rate = (strain[1] - strain[0]) * 1e15 / (step[1] - step[0])  # in fs⁻¹
-viscosity = stress * 1e9 / strain_rate  # in Pa·s
-plt.figure(figsize=(8, 6))
-plt.plot(step, viscosity, "b-", linewidth=1.5)
-plt.xlabel("Time Step")
-plt.ylabel("Viscosity (Pa·s)")
-plt.title(f"Viscosity Evolution at T=246K, Strain Rate: {strain_rate:.2e} fs⁻¹")
-plt.grid(True, linestyle="--", alpha=0.7)
-window_size = max(100, int(len(viscosity) * 0.01))
-# viscosity = np.convolve(viscosity, np.ones(window_size) / window_size, mode="valid")
-start_idx = int(len(viscosity) * 0.3)
-end_idx = int(len(viscosity) * 0.75)
-average_viscosity = np.mean(viscosity[start_idx:end_idx])
-rms_viscosity = np.std(viscosity[start_idx:end_idx])
-plt.axhline(
-    y=average_viscosity, color="r", linestyle="--", label=f"Avg: {average_viscosity:.4f} Pa·s"
-)
-plt.fill_between(
-    step,
-    average_viscosity - rms_viscosity,
-    average_viscosity + rms_viscosity,
-    color="r",
-    alpha=0.2,
-)
-plt.legend(loc="best")
-print(f"{txt_file}: Average viscosity: {average_viscosity:.5f} ± {rms_viscosity:.5f} Pa·s")
-# plt.savefig("viscosity_246K_2.5e-5_4096.png", dpi=300)
+txt_files = [
+    "/home/debian/water/TIP4P/Ice/225/shear/stress_1e-6_225.0.data",
+    "/home/debian/water/TIP4P/Ice/225/shear/stress_5e-6_225.0.data",
+    "/home/debian/water/TIP4P/Ice/225/shear/stress_1e-5_225.0.data",
+    "/home/debian/water/TIP4P/Ice/225/shear/stress_5e-5_225.0.data",
+    "/home/debian/water/TIP4P/Ice/225/shear/stress_1e-4_225.0.data",
+    "/home/debian/water/TIP4P/Ice/225/shear/stress_5e-4_225.0_new.data",
+]
+exp_data = [
+    (5.006e10, 5.194e-3),
+    (2.010e10, 1.000e-2),
+    (9.958e9, 1.852e-2),
+    (5.037e9, 3.173e-2),
+    (2.495e9, 5.725e-2),
+    (1.002e9, 1.322e-1),
+    (4.964e8, 2.054e-1),
+]
+viscosities = []
+strain_rates = []
+for txt_file in txt_files:
+    step, strain, stress = np.loadtxt(txt_file, comments="#", unpack=True)
+    strain_rate = (strain[1] - strain[0]) * 1e15 / (step[1] - step[0])  # in fs⁻¹
+    viscosity = stress * 1e9 / strain_rate  # in Pa·s
+    plt.figure(figsize=(8, 6))
+    plt.plot(step, viscosity, "b-", linewidth=1.5)
+    plt.xlabel("Time Step")
+    plt.ylabel("Viscosity (Pa·s)")
+    plt.title(f"Viscosity Evolution at T=225K, Strain Rate: {strain_rate:.2e} fs⁻¹")
+    plt.grid(True, linestyle="--", alpha=0.7)
+    window_size = max(100, int(len(viscosity) * 0.01))
+    # viscosity = np.convolve(viscosity, np.ones(window_size) / window_size, mode="valid")
+    start_idx = int(len(viscosity) * 0.3)
+    end_idx = int(len(viscosity) * 0.75)
+    average_viscosity = np.mean(viscosity[start_idx:end_idx])
+    rms_viscosity = np.std(viscosity[start_idx:end_idx])
+    plt.axhline(
+        y=average_viscosity, color="r", linestyle="--", label=f"Avg: {average_viscosity:.4f} Pa·s"
+    )
+    plt.fill_between(
+        step,
+        average_viscosity - rms_viscosity,
+        average_viscosity + rms_viscosity,
+        color="r",
+        alpha=0.2,
+    )
+    plt.legend(loc="best")
+    print(f"{txt_file}: Average viscosity: {average_viscosity:.5f} ± {rms_viscosity:.5f} Pa·s")
+    # plt.savefig("viscosity_246K_2.5e-5_4096.png", dpi=300)
+    viscosities.append((average_viscosity, rms_viscosity))
+    strain_rates.append(strain_rate)
 plt.show()
+plt.figure(figsize=(8, 6))
+plt.errorbar(
+    strain_rates, [v[0] for v in viscosities], yerr=[v[1] for v in viscosities], fmt="o-", capsize=5
+)
+plt.plot([v[0] for v in exp_data], [v[1] for v in exp_data], label="Ribeiro data at 226K")
+plt.xscale("log")
+plt.yscale("log")
+plt.xlabel("Strain Rate (fs⁻¹)")
+plt.ylabel("Average Viscosity (Pa·s)")
+plt.title("Viscosity vs Strain Rate at T=225K")
+plt.grid(True, linestyle="--", alpha=0.7)
+plt.legend()
+# plt.savefig(
+#     "/home/debian/water/TIP4P/2005/2020/rst/4096/viscosity_vs_strain_rate_246K.png", dpi=300
+# )
+plt.show()
+# 计算log坐标下的斜率
+log_strain_rates = np.log10(strain_rates)
+log_viscosities = np.log10([v[0] for v in viscosities])
+slope, intercept = np.polyfit(log_strain_rates, log_viscosities, 1)
+print(f"Slope of log-log plot: {slope:.4f}")
 
 # u = mda.Universe(
 #     "/home/debian/water/TIP4P/2005/2020/4096/traj_2.5e-5_246.lammpstrj", format="LAMMPSDUMP"

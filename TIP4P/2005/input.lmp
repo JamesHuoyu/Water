@@ -4,7 +4,7 @@ boundary p p p
 
 package intel 1 omp 2
 
-read_data 1H2O
+read_data ./1H2O
 replicate 8 8 8
 
 pair_style lj/cut/tip4p/long 1 2 1 1 0.1546 9.5

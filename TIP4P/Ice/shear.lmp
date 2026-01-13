@@ -75,15 +75,15 @@ thermo 1000
 thermo_style custom step temp etotal pe pxy v_sxy v_strain v_viscosity
 thermo_modify flush yes
 
-dump traj all custom 200 traj_${gamma}_${T}.lammpstrj id type xu yu zu # 0.2ps
+dump traj all custom 25 traj_${gamma}_${T}_new_new.lammpstrj id type xu yu zu # 0.025ps
 dump_modify traj sort id
-fix stress all ave/time 500 1 500 v_strain v_sxy file stress_${gamma}_${T}.data  # 每0.5ps输出一次应力和应变
+# fix stress all ave/time 500 1 500 v_strain v_sxy file stress_${gamma}_${T}_new.data  # 每0.5ps输出一次应力和应变
 
 # compute peratom all stress/atom NULL
 # dump stress gO custom 5000 stress_${gamma}_${T}.lammpstrj id type c_peratom[1] c_peratom[2] c_peratom[3] c_peratom[4] c_peratom[5] c_peratom[6]
 # dump_modify stress sort id
 
-variable Ttotal equal 1000000 # 1 ns
+variable Ttotal equal 250000 # 0.25 ns
 variable nloops equal ceil(${Ttotal}/(100000))
 print "Total loops: ${nloops}"
 

@@ -365,6 +365,74 @@ class HBMemoryEfficient:
         }
 
 
+class StructureAnalyzer:
+    def __init__(self, dump_file, out_dir="output"):
+        self.dump_file = dump_file
+        self.out_dir = out_dir
+        os.makedirs(out_dir, exist_ok=True)
+        self.u = mda.Universe(dump_file, format="LAMMPSDUMP")
+        self.O_atoms = self.u.select_atoms("type 1")
+
+    @staticmethod
+    def min_HOO_angle(Oi, Oj, box, O_to_H, positions):
+        """
+        返回一对水分子的最小 H-O-O 角（单位：弧度）
+        """
+        from MDAnalysis.lib.distances import minimize_vectors
+
+        # OO 向量（最小镜像）,使用Oi:Oi+1是为了保持二维数组的形状，方便后续计算
+        r_OO = minimize_vectors(positions[Oj : Oj + 1] - positions[Oi : Oi + 1], box)
+        r_OO_flat = r_OO.flatten()
+        r_OO_norm = np.linalg.norm(r_OO_flat)
+        # 验证这个方法是否正确
+        from MDAnalysis.lib.distances import distance_array
+
+        dtest = distance_array(positions[Oi : Oi + 1], positions[Oj : Oj + 1], box=box)
+        min_angle = np.pi
+
+        # A 分子的 OH
+        for h in O_to_H[Oi]:
+            r_OH = minimize_vectors(positions[h].reshape(1, 3) - positions[Oi : Oi + 1], box)
+            r_OH_flat = r_OH.flatten()
+            cos_theta = np.dot(r_OH_flat, r_OO_flat) / (np.linalg.norm(r_OH_flat) * r_OO_norm)
+            angle = np.arccos(np.clip(cos_theta, -1.0, 1.0))
+            min_angle = min(min_angle, angle)
+
+        # B 分子的 OH（注意 OO 方向反过来）
+        for h in O_to_H[Oj]:
+            r_OH = minimize_vectors(positions[h].reshape(1, 3) - positions[Oj : Oj + 1], box)
+            r_OH_flat = r_OH.flatten()
+            cos_theta = np.dot(r_OH_flat, -r_OO_flat) / (np.linalg.norm(r_OH_flat) * r_OO_norm)
+            angle = np.arccos(np.clip(cos_theta, -1.0, 1.0))
+            min_angle = min(min_angle, angle)
+
+        return r_OO_norm, np.degrees(min_angle)
+
+    def analyze_frame(self, frame, threshold=6):
+        """
+        获得指定帧的信息
+        """
+        self.u.trajectory[frame]
+        box = self.u.dimensions
+        positions = self.u.atoms.positions
+        O_to_H = dict()
+        for atom in self.u.atoms:
+            if atom.type == "1":  # O
+                O_to_H[atom.index] = [atom.index + 1, atom.index + 2]
+        results = dict()
+        # 用FastNS缩短查询邻居个数
+        coords_O = self.O_atoms.positions.astype(np.float32)
+        ns = FastNS(threshold, coords_O, box=box)
+        res = ns.self_search()
+        pairs = res.get_pairs()  # (i, j) local indices; i < j normally
+        for i, j in pairs:
+            Oi = self.O_atoms[i]
+            Oj = self.O_atoms[j]
+            dist, angle = self.min_HOO_angle(Oi.index, Oj.index, box, O_to_H, positions)
+            results[(Oi.index, Oj.index)] = (dist, angle)
+        return results
+
+
 # ------------------ CLI ------------------
 def main():
     parser = argparse.ArgumentParser(

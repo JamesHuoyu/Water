@@ -30,7 +30,7 @@ class ZetaCgCalculator:
         self.boxs = np.zeros((self.frames, 6), dtype=np.float32)
         for ts in tqdm(self.universe.trajectory[start_index:], desc="Loading trajectory data"):
             self.coords[ts.frame - start_index] = self.O_atoms.positions.copy()
-            self.boxs[ts.frame - start_index] = ts.dimensions
+            self.boxs[ts.frame - start_index] = ts.dimensions.copy()
         if shear_rate != 0.0:
             self.shear_correction(shear_rate, time_step)
         self.zeta = zeta
