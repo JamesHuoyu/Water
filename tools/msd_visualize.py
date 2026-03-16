@@ -7,7 +7,7 @@ from scipy.optimize import curve_fit
 def cal_diffusion_coefficient(time_ps, msd):
     """计算扩散系数D，假设MSD = 2nDt，其中特征长度n为1"""
     n_points = len(time_ps)
-    start_index = int(n_points * 0.1)
+    start_index = int(n_points * 0.8)
     x_fit = time_ps[start_index:]
     y_fit = msd[start_index:]
     popt, _ = curve_fit(lambda t, D: 2 * 1 * D * t, x_fit, y_fit)
@@ -51,21 +51,24 @@ if __name__ == "__main__":
     # 创建图形
     plt.figure(figsize=(10, 7))
 
-    filepath = "/home/debian/water/TIP4P/Ice/225/shear/rst/msd_results.h5"
+    filepath = "/home/debian/water/TIP4P/Ice/test/msd_results.h5"
     # plot_msd(filepath, "1e-6", color="blue", linestyle="-", label="1e-6(z)")
-    # plot_msd(filepath, "-1e-6x", color="blue", linestyle="--", label="1e-6(x)")
-    plot_msd(filepath, "5e-6", color="red", linestyle="-", label="5e-6(z)")
-    plot_msd(filepath, "-5e-6y", color="red", linestyle="-.", label="5e-6(y)")
-    plot_msd(filepath, "-5e-6x", color="red", linestyle="--", label="5e-6(x)")
-    plot_msd(filepath, "5e-5", color="green", linestyle="-", label="5e-5(z)")
-    plot_msd(filepath, "-5e-5y", color="green", linestyle="-.", label="5e-5(y)")
-    plot_msd(filepath, "-5e-5x", color="green", linestyle="--", label="5e-5(x)")
-    plot_msd(filepath, "1e-4", color="orange", linestyle="-", label="1e-4(z)")
-    plot_msd(filepath, "-1e-4y", color="orange", linestyle="-.", label="1e-4(y)")
-    plot_msd(filepath, "-1e-4x", color="orange", linestyle="--", label="1e-4(x)")
-    # plot_msd(filepath, "5e-4", color="purple", linestyle="-", label="5e-4(z)")
-    # plot_msd(filepath, "-5e-4x", color="purple", linestyle="--", label="5e-4(x)")
-    # plot_msd(filepath, "equili", color="black", linestyle="-", label="Equilibrium(z)")
+    plot_msd(filepath, "equili", color="black", linestyle="-", label="equili")
+    plot_msd(filepath, "1e-6-z", color="blue", linestyle="-", label="1e-6(z)")
+    plot_msd(filepath, "1e-6-y", color="blue", linestyle="-.", label="1e-6(y)")
+    plot_msd(filepath, "1e-6-x", color="blue", linestyle="--", label="1e-6(x)")
+    plot_msd(filepath, "5e-6-z", color="yellow", linestyle="-", label="5e-6(z)")
+    plot_msd(filepath, "5e-6-y", color="yellow", linestyle="-.", label="5e-6(y)")
+    plot_msd(filepath, "5e-6-x", color="yellow", linestyle="--", label="5e-6(x)")
+    plot_msd(filepath, "1e-5-z", color="red", linestyle="-", label="1e-5(z)")
+    plot_msd(filepath, "1e-5-y", color="red", linestyle="-.", label="1e-5(y)")
+    plot_msd(filepath, "1e-5-x", color="red", linestyle="--", label="1e-5(x)")
+    plot_msd(filepath, "5e-5-z", color="green", linestyle="-", label="5e-5(z)")
+    plot_msd(filepath, "5e-5-y", color="green", linestyle="-.", label="5e-5(y)")
+    plot_msd(filepath, "5e-5-x", color="green", linestyle="--", label="5e-5(x)")
+    plot_msd(filepath, "1e-4-z", color="orange", linestyle="-", label="1e-4(z)")
+    plot_msd(filepath, "1e-4-y", color="orange", linestyle="-.", label="1e-4(y)")
+    plot_msd(filepath, "1e-4-x", color="orange", linestyle="--", label="1e-4(x)")
     print("Finished plotting all MSD curves.")
     # # 绘制所有曲线
     # for shear_rate, color in shear_rates.items():

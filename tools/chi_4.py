@@ -56,7 +56,7 @@ class Chi4Calculator:
 
     def compute_overlap_for_origin(self, t0: int):
         return self._compute_overlap_numba(
-            self.coords, t0, self.frames - t0, len(self.O_atoms), a=1.0
+            self.coords, t0, self.frames - t0, len(self.O_atoms), a=0.65
         )
 
     def time_origin_average(self, max_tau: int = None) -> np.ndarray:
@@ -89,30 +89,30 @@ class Chi4Calculator:
 
 if __name__ == "__main__":
     pathfiles = [
-        # "/home/debian/water/TIP4P/Ice/225/shear/traj_1e-6_225.0.lammpstrj",
-        "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-6_225.0_new.lammpstrj",
-        "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-5_225.0_new.lammpstrj",
-        "/home/debian/water/TIP4P/Ice/225/shear/traj_1e-4_225.0_new.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/test/traj_1e-6_225_100000.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/test/traj_5e-6_225_100000.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/test/traj_5e-5_225_100000.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/test/traj_1e-4_225_100000.lammpstrj",
         # "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-4_225.0.lammpstrj",
         # "/home/debian/water/TIP4P/Ice/225/dump_225_test.lammpstrj"
+        # "/home/debian/water/TIP4P/Ice/test/traj_1e-5_225_100000.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/test/traj_5e-5_225_100000.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/test/traj_1e-4_225_100000.lammpstrj",
     ]
-    output_h5 = "/home/debian/water/TIP4P/Ice/225/shear/rst/chi4_results.h5"
+    output_h5 = "/home/debian/water/TIP4P/Ice/test/test_chi4_results.h5"
     # output_h5 = "/home/debian/water/TIP4P/2005/Tanaka_2018/rst/equili_chi4_results.h5"
 
     store = pd.HDFStore(output_h5)
 
-    start_index = 3000  # 跳过前1500帧以避免初始非平衡影响
+    start_index = 0  # 跳过前1500帧以避免初始非平衡影响
     # start_index = 25000
     # start_index = 0  # 不跳过任何帧
 
     for pathfile in pathfiles:
-        # time_step = 0.05  # ps
-        # time_step = 0.02  # 20fs
-        # time_step = 0.002  # 2fs
-        time_step = 0.05  # 50fs
+        time_step = 0.025  # 25fs
         u = mda.Universe(pathfile, format="LAMMPSDUMP")
         shear_rate = float(pathfile.split("traj_")[-1].split("_225")[0]) * 1e3
-        # print(f"shear_rate extracted: {shear_rate} 1/ps")
+        print(f"shear_rate extracted: {shear_rate} 1/ps")
         chi4_calculator = Chi4Calculator(
             u, shear_rate=shear_rate, time_step=time_step, start_index=start_index
         )  # shear_rate in 1/ps(7.5e-2 1/fs)

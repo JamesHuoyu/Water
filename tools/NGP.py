@@ -152,47 +152,42 @@ def save_O_dict_to_h5(h5_file, strain_rate, O_dict):
 #             store.put(key, df, format="table", data_columns=True)
 
 
-# 示例计算和可视化
-file_paths = [
-    # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_1e-5_246.lammpstrj",
-    # # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-5_246.lammpstrj",
-    # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_7.5e-5_246.lammpstrj",
-    # "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_2.5e-4_246.lammpstrj",
-    "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-6_225.0_new.lammpstrj",
-    # "/home/debian/water/TIP4P/Ice/225/shear/traj_1e-4_225.0.lammpstrj",
-    # "/home/debian/water/TIP4P/Ice/225/dump_225_test.lammpstrj"
-]
-# file_path = "/home/debian/water/TIP4P/2005/dump_H2O_246_10.lammpstrj"
-for file_path in file_paths:
-    u = mda.Universe(file_path, format="LAMMPSDUMP")
-    O_atoms = u.select_atoms("type 1")
-    coords = np.zeros(shape=(len(u.trajectory), O_atoms.n_atoms, 3))
-    for ts in tqdm(u.trajectory):
-        coords[ts.frame] = O_atoms.positions.copy()
-    # coords = np.zeros(shape=(len(u.trajectory[2000:4000]), O_atoms.n_atoms, 3))
-    # # coords = np.zeros(shape=(len(u.trajectory), O_atoms.n_atoms, 3))
-    # # for ts in tqdm(u.trajectory):
-    # # coords[ts.frame] = O_atoms.positions.copy()
-    # for ts in tqdm(u.trajectory[2000:4000]):
-    #     coords[ts.frame - 2000] = O_atoms.positions.copy()
-    shear_rate = float(file_path.split("traj_")[-1].split("_225")[0]) * 1e3  # 1/ps
-    # shear_rate = 0  # 1/ps
-    time_step = 0.05  # ps
-    # time_step = 0.02  # ps
-    print(f"shear_rate extracted: {shear_rate} 1/ps")
-    coords = apply_shear_correction(coords, shear_rate, time_step, ref_y=25.0)
+for threshold in [0.25, 0.3, 0.35, 0.4]:
+    # 示例计算和可视化
+    file_paths = [
+        "/home/debian/water/TIP4P/Ice/test/traj_5e-5_225_100000.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/test/traj_5e-6_225_100000.lammpstrj",
+    ]
+    # file_path = "/home/debian/water/TIP4P/2005/dump_H2O_246_10.lammpstrj"
+    for file_path in file_paths:
+        u = mda.Universe(file_path, format="LAMMPSDUMP")
+        O_atoms = u.select_atoms("type 1")
+        start_frame = 0  # 跳过前800帧以避免初始非平衡影响
+        coords = np.zeros(shape=(len(u.trajectory[start_frame:]), O_atoms.n_atoms, 3))
+        for ts in tqdm(u.trajectory[start_frame:]):
+            coords[ts.frame - start_frame] = O_atoms.positions.copy()
+        shear_rate = float(file_path.split("traj_")[-1].split("_225")[0]) * 1e3  # 1/ps
+        # shear_rate = 0  # 1/ps
+        time_step = 0.025  # ps
+        # time_step = 0.02  # ps
+        print(f"shear_rate extracted: {shear_rate} 1/ps")
+        coords = apply_shear_correction(coords, shear_rate, time_step, ref_y=25.0)
 
-    O_dict = {}
-    for i in tqdm(range(coords.shape[1]), desc="Computing non-trival displacements for O atoms"):
-        positions = coords[:, i, :]
-        O_idx = O_atoms.indices[i]
-        computed_indices = compute_non_trival_iterable(positions, threshold=0.72)  # Å
-        O_dict[O_idx] = computed_indices
+        O_dict = {}
+        for i in tqdm(
+            range(coords.shape[1]), desc="Computing non-trival displacements for O atoms"
+        ):
+            positions = coords[:, i, :]
+            O_idx = O_atoms.indices[i]
+            computed_indices = compute_non_trival_iterable(positions, threshold=threshold)  # Å
+            O_dict[O_idx] = computed_indices
 
-    output_h5 = "/home/debian/water/TIP4P/Ice/225/shear/rst/non_trival_displacement_results.h5"
-    key = file_path.split("traj_")[-1].split("_225")[0]
-    # key = "equili"
-    save_O_dict_to_h5(output_h5, key, O_dict)
+        output_h5 = "/home/debian/water/TIP4P/Ice/test/test_non_trival_displacement_results.h5"
+        key = file_path.split("traj_")[-1].split("_225")[0]
+        key = f"{key}-{threshold}"
+        # key = "equili"
+        print(f"Saving non-trival displacement results to {output_h5} under key '{key}'")
+        save_O_dict_to_h5(output_h5, key, O_dict)
 # # 做成上下两部分的图，上半部分是位移，下半部分是 non-trival displacement
 # fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 # ax1.plot(displacement, label="Displacement", color="blue")

@@ -2,15 +2,12 @@ units real
 atom_style full
 boundary p p p
 
-# package intel 1 omp 2
-
-
 pair_style lj/cut/tip4p/long 1 2 1 1 0.1577 9.5
 bond_style zero
 angle_style zero
 pair_modify tail yes
 
-read_data /home/debian/water/TIP4P/Ice/225/tip4p-ice-225K.data
+read_data /home/debian/water/TIP4P/Ice/tip4p-ice.data
 
 kspace_style pppm/tip4p 1.0e-5
 
@@ -36,14 +33,14 @@ variable density_sys equal v_massAll/v_volCm3
 variable tmp equal temp
 
 thermo 1000
-thermo_style custom step temp vol etotal pe lx v_density_sys
+thermo_style custom step temp vol etotal pe pxy v_density_sys
 thermo_modify flush yes
 
-# velocity all create 225.0 4928459 rot yes dist gaussian
-
+velocity all create 225.0 4928459 rot yes dist gaussian
+compute peratom all stress/atom NULL virial
 fix fnvt all nvt temp 225.0 225.0 100.0
-dump 1 all custom 200 dump_225_test.lammpstrj id type xu yu zu # 间隔0.2ps采样
-dump_modify 1 sort id
-run 500000 # 500ps
-# run 2000000 # 2ns
-# write_data tip4p-ice-225K.data pair ij
+# dump 1 all custom 200 dump_225_test_sxy.lammpstrj id type xu yu zu c_peratom[4]# 间隔0.2ps采样
+# dump_modify 1 sort id
+# run 500000 # 500ps
+run 2000000 # 2ns
+write_data tip4p-ice-225K.data pair ij

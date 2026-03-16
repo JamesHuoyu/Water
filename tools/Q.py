@@ -39,7 +39,7 @@ class QCalculator:
 
     @staticmethod
     @jit(nopython=True, parallel=True, fastmath=True)
-    def _compute_overlap_numba(coords, t0, max_tau, n_particles, a=1.0):
+    def _compute_overlap_numba(coords, t0, max_tau, n_particles, a=0.6):
         n_tau = min(coords.shape[0] - t0, max_tau)
         Q_t0 = np.zeros(n_tau)
         ref_pos = coords[t0]
@@ -55,7 +55,7 @@ class QCalculator:
 
     def compute_overlap_for_origin(self, t0: int):
         return self._compute_overlap_numba(
-            self.coords, t0, self.frames - t0, len(self.O_atoms), a=1.0
+            self.coords, t0, self.frames - t0, len(self.O_atoms), a=0.65
         )
 
     def time_origin_average(self, max_tau: int = None) -> np.ndarray:
@@ -82,22 +82,21 @@ class QCalculator:
 
 if __name__ == "__main__":
     pathfiles = [
-        # "/home/debian/water/TIP4P/Ice/225/shear/traj_1e-6_225.0.lammpstrj",
-        # "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-6_225.0.lammpstrj",
-        "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-5_225.0.lammpstrj",
-        # "/home/debian/water/TIP4P/Ice/225/shear/traj_1e-4_225.0.lammpstrj",
-        # "/home/debian/water/TIP4P/Ice/225/shear/traj_5e-4_225.0.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/test/traj_1e-6_225_100000.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/test/traj_5e-6_225_100000.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/test/traj_5e-5_225_100000.lammpstrj",
+        # "/home/debian/water/TIP4P/Ice/225/dump_225_test.lammpstrj",
     ]
-    output_h5 = "/home/debian/water/TIP4P/Ice/225/shear/rst/Q_results.h5"
+    output_h5 = "/home/debian/water/TIP4P/Ice/test/Q_results.h5"
 
     store = pd.HDFStore(output_h5)
 
     # start_index = 2000  # 跳过前2000帧以避免初始非平衡影响
-    start_index = 1500  # 跳过前7000帧以避免初始非平衡影响
+    start_index = 2000  # 跳过前7000帧以避免初始非平衡影响
 
     for pathfile in pathfiles:
         # time_step = 0.05  # ps
-        time_step = 0.2  # ps
+        time_step = 0.025  # ps
         u = mda.Universe(pathfile, format="LAMMPSDUMP")
         shear_rate = float(pathfile.split("traj_")[-1].split("_225")[0])  # 从文件名中提取剪切率
         shear_rate *= 1e3  # 转换为1/ps单位
@@ -105,6 +104,7 @@ if __name__ == "__main__":
         Q_calculator = QCalculator(
             u, shear_rate=shear_rate, time_step=time_step, start_index=start_index
         )  # shear_rate in 1/ps(7.5e-2 1/fs)
+        # Q_calculator = QCalculator(u, time_step=time_step, start_index=start_index)
         Q = Q_calculator.compute_Q()
         times = np.arange(len(Q)) * time_step
 

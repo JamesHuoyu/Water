@@ -3,9 +3,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def extract_viscosity_from_log(log_file, output_txt="viscosity_data.txt"):
+def extract_pxy_from_log(log_file, output_txt="pxy_data.txt"):
     """
-    从LAMMPS log文件中提取timestep和v_viscosity数据
+    从LAMMPS log文件中提取timestep和Pxy数据
 
     参数:
     log_file: LAMMPS log文件路径
@@ -14,38 +14,50 @@ def extract_viscosity_from_log(log_file, output_txt="viscosity_data.txt"):
 
     # 用于存储提取的数据
     timesteps = []
-    viscosities = []
+    pxy_values = []
 
     # 编译正则表达式，匹配数据行
-    # 匹配类似这样的行: "     10000   225.08508     -52316.027     -57811.663     -697.5823       0.072434999    0.05           0.014487"
+    # 匹配类似这样的行: "     100   227.64461     -52548.587     -58106.716     -358.17217      0.038076637    0.005          0.00076153273"
+    # 我们需要第1列(Step)和第5列(Pxy)
     data_pattern = re.compile(
-        r"^\s*(\d+)\s+[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s+[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s+[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s+[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s+[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s+[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*$"
+        r"^\s*(\d+)\s+[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s+[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s+[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s+[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s+[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s+[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s*$"
     )
+
+    # 编译一个更简单的正则表达式版本，用于更灵活匹配
+    # 匹配: 数字 空格+ 数字 空格+ 数字 空格+ 数字 空格+ 数字（第5列，Pxy）
+    simple_pattern = re.compile(r"^\s*(\d+)\s+\S+\s+\S+\s+\S+\s+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)")
 
     with open(log_file, "r") as f:
         for line in f:
             # 使用正则表达式匹配
             match = data_pattern.match(line)
-            if match:
-                timestep = int(match.group(1))
-                viscosity = float(match.group(2))
+            if not match:
+                # 尝试简单模式匹配
+                match = simple_pattern.match(line)
 
-                timesteps.append(timestep)
-                viscosities.append(viscosity)
+            if match:
+                try:
+                    timestep = int(match.group(1))
+                    pxy = float(match.group(2))
+
+                    timesteps.append(timestep)
+                    pxy_values.append(pxy)
+                except ValueError:
+                    continue
 
     # 写入txt文件
     with open(output_txt, "w") as f:
-        f.write("# Timestep  v_viscosity\n")
-        for ts, visc in zip(timesteps, viscosities):
-            f.write(f"{ts}  {visc:.10f}\n")
+        f.write("# Step Pxy\n")
+        for ts, pxy in zip(timesteps, pxy_values):
+            f.write(f"{ts} {pxy}\n")
 
     print(f"提取了 {len(timesteps)} 个数据点")
     print(f"数据已保存到 {output_txt}")
 
-    return np.array(timesteps), np.array(viscosities)
+    return np.array(timesteps), np.array(pxy_values)
 
 
-def plot_viscosity(timesteps, viscosities, output_png="viscosity_plot.png"):
+def plot_viscosity(timesteps, viscosities, shear_rate, output_png="viscosity_plot.png"):
     """绘制viscosity随时间的变化图"""
 
     # 创建图形
@@ -53,7 +65,7 @@ def plot_viscosity(timesteps, viscosities, output_png="viscosity_plot.png"):
 
     # 计算strain (假设从0开始，每1000步增加0.005)
     # 从你的数据看，v_strain每1000步增加0.005
-    strain = timesteps * 0.005 / 1000.0
+    strain = shear_rate * timesteps
 
     # 绘制viscosity随timestep的变化
     plt.subplot(1, 2, 1)
@@ -172,19 +184,19 @@ def extract_from_multiple_logs(log_files, output_txt="combined_viscosity.txt"):
 # 主程序
 if __name__ == "__main__":
     # 指定你的log文件路径
-    log_file_path = "/home/debian/water/TIP4P/Ice/225/shear/log.shear_5e-6_225_new.lammps"  # 替换为你的log文件路径
+    log_file_path = "/home/debian/water/TIP4P/Ice/test/log_5e-6_225.lammps"  # 替换为你的log文件路径
 
     try:
         # 方法1: 使用简单方法提取
         print("使用简单方法提取数据...")
-        timesteps, viscosities = extract_viscosity_simple(log_file_path, "viscosity_data.txt")
+        timesteps, pxy_values = extract_pxy_from_log(log_file_path, "pxy_data.txt")
 
-        # 绘制图形
-        plot_viscosity(timesteps, viscosities, "viscosity_plot.png")
+        # # 绘制图形
+        # plot_viscosity(timesteps, pxy_values, 5e-6, "viscosity_plot5e-6.png")
 
-        # 保存为numpy格式以便后续处理
-        np.savez("viscosity_data.npz", timesteps=timesteps, viscosities=viscosities)
-        print("数据已保存为 viscosity_data.npz")
+        # # 保存为numpy格式以便后续处理
+        # np.savez("viscosity_data.npz", timesteps=timesteps, viscosities=viscosities)
+        # print("数据已保存为 viscosity_data.npz")
 
     except FileNotFoundError:
         print(f"错误: 找不到文件 {log_file_path}")

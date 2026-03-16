@@ -1,0 +1,133 @@
+units real
+atom_style full
+boundary p p p
+
+pair_style lj/cut/tip4p/long 1 2 1 1 0.1577 9.5
+
+bond_style zero
+angle_style zero
+pair_modify tail yes
+
+read_data /home/debian/water/TIP4P/Ice/test/tip4p-ice-225K.data
+
+print "Initial configuration loaded."
+reset_timestep 0
+print "Applying shear rate: ${gamma}"
+change_box all triclinic
+kspace_style pppm/tip4p 1.0e-5
+
+pair_coeff 1 1 0.21084 3.1668 #O-O
+pair_coeff * 2 0.0 1.0
+
+bond_coeff 1 0.9572 #O-H
+angle_coeff 1 104.52 #H-O-H
+
+group gH2O type 1 2
+group gO type 1
+
+neighbor 3.0 bin
+neigh_modify delay 0 every 1 check yes
+
+timestep 1.0
+fix 1 gH2O shake 1.0e-4 100 10000 b 1 a 1
+
+# # 系统弛豫到平衡态
+# fix fnvt_equil all nvt temp ${T} ${T} 100.0
+# thermo 1000
+# thermo_style custom step temp etotal pe
+# thermo_modify flush yes
+# run 100000 # 100 ps
+# unfix fnvt_equil
+
+# 系统剪切变形
+variable shear_rate equal ${gamma}
+variable v_lo equal -0.5*ly*v_shear_rate
+variable v_hi equal  0.5*ly*v_shear_rate
+variable ylo equal -0.5*ly
+variable yhi equal  0.5*ly
+
+velocity all ramp vx ${v_lo} ${v_hi} y ${ylo} ${yhi} sum yes units box
+
+print "Velocity ramp from y=${ylo} to y=${yhi}"
+
+fix fdeform all deform 1 xy erate ${gamma} remap v
+fix fnvt all nvt/sllod temp ${T} ${T} 100.0
+
+# ------- 加入动量修正项 -------
+fix mom_shear all momentum 20 linear 1 1 1 angular
+# # -------- 使用fix recenter --------
+# fix center all recenter 0 0 0 
+
+compute tilt all temp/deform
+# compute 	        layers all chunk/atom bin/1d y center 0.05 units reduced
+# fix 		        layers_vx all ave/chunk 20 250 5000 layers vx file profile_vx_${gamma}.txt
+variable L0_x equal lx
+variable L0_y equal ly
+variable L0_z equal lz
+
+compute p all pressure NULL virial
+variable sxy equal -c_p[4] * 1.01325e-4  # convert to GPa
+
+# # ------- Per-atom shear stress computation -------
+# compute peratom all stress/atom NULL virial
+# dump peratom_stress all custom 25 peratom_stress_${gamma}_${T}.lammpstrj id type xu yu zu c_peratom[4]
+# dump_modify peratom_stress sort id
+
+
+variable dt equal 1.0e-15
+variable gammaSI equal ${gamma}*1e15
+
+variable massAll equal mass(all)/6.022e23
+variable volCm3 equal vol*1.0e-24
+variable density_sys equal v_massAll/v_volCm3
+variable tau_pa equal v_sxy * 1e9
+variable gamma_s equal ${gamma} * 1e15
+variable viscosity equal v_tau_pa / v_gamma_s
+
+variable strain equal step*${gammaSI}*${dt}
+
+thermo 25
+thermo_style custom step temp etotal pe pxy v_sxy v_strain v_viscosity
+thermo_modify flush yes
+
+
+# ---------为低速剪切设置输出轨迹文件---------
+# ----- set PPPM reset loop -----
+variable strain_reset equal 0.01 # 1% strain reset
+variable stepsPerReset equal ceil(${strain_reset}/(${gammaSI}*${dt}))
+
+print "Steps per PPPM reset: ${stepsPerReset}"
+
+variable total_steps equal ceil(${Tpre}/${stepsPerReset})
+print "Total steps: ${Tpre}"
+
+variable nloop loop ${total_steps}
+label loop_start
+run ${stepsPerReset}
+kspace_style pppm/tip4p 1.0e-5
+next nloop
+jump SELF loop_start
+# undump peratom_stress
+write_data /home/debian/water/TIP4P/Ice/test/iso_input_${gamma}_${T}_${Tpre}.data pair ij
+
+
+# ------- dump trajectory -------
+compute peratom all stress/atom NULL virial
+dump traj all custom 25 traj_${gamma}_${T}_${Ttotal}_sxy.lammpstrj id type xu yu zu c_peratom[4] # 0.025ps
+dump_modify traj sort id
+
+
+variable Ttotal equal ${Ttotal} # 0.0625 ns = 62500 steps
+
+
+
+# ----- set PPPM reset loop -----
+variable total_steps2 equal ceil(${Ttotal}/${stepsPerReset})
+print "Total steps: ${total_steps2}"
+
+variable nloop2 loop ${total_steps2}
+label loop_start2
+run ${stepsPerReset}
+kspace_style pppm/tip4p 1.0e-5
+next nloop2
+jump SELF loop_start2

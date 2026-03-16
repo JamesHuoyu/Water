@@ -17,6 +17,7 @@ class ZetaCgCalculator:
         shear_rate: float = 0.0,
         time_step: float = 1.0,
         start_index: int = 0,
+        end_index: int = -1,
         cutoff: float = 3.5,
     ):
         self.universe = universe
@@ -28,9 +29,16 @@ class ZetaCgCalculator:
         self.frames = self.n_frames - start_index
         self.coords = np.zeros((self.frames, len(self.O_atoms), 3), dtype=np.float32)
         self.boxs = np.zeros((self.frames, 6), dtype=np.float32)
-        for ts in tqdm(self.universe.trajectory[start_index:], desc="Loading trajectory data"):
-            self.coords[ts.frame - start_index] = self.O_atoms.positions.copy()
-            self.boxs[ts.frame - start_index] = ts.dimensions.copy()
+        if end_index is not None or end_index != -1:
+            for ts in tqdm(
+                self.universe.trajectory[start_index:end_index], desc="Loading trajectory data"
+            ):
+                self.coords[ts.frame - start_index] = self.O_atoms.positions.copy()
+                self.boxs[ts.frame - start_index] = ts.dimensions.copy()
+        else:
+            for ts in tqdm(self.universe.trajectory[start_index:], desc="Loading trajectory data"):
+                self.coords[ts.frame - start_index] = self.O_atoms.positions.copy()
+                self.boxs[ts.frame - start_index] = ts.dimensions.copy()
         if shear_rate != 0.0:
             self.shear_correction(shear_rate, time_step)
         self.zeta = zeta
@@ -212,21 +220,22 @@ class ZetaTimeCgCalculator:
 
 if __name__ == "__main__":
     path_files = [
-        "/home/debian/water/TIP4P/2005/nvt/dump_225_test.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/test/5e-6/traj_5e-6_225_100000.lammpstrj",
     ]
-    zeta_file = "/home/debian/water/TIP4P/2005/nvt/rst/equili/zeta.csv"
-    output_csv = "/home/debian/water/TIP4P/2005/nvt/rst/equili/zeta_cg.csv"
+    zeta_file = "/home/debian/water/TIP4P/Ice/test/5e-6/zeta.csv"
+    output_csv = "/home/debian/water/TIP4P/Ice/test/5e-6/zeta_cg.csv"
     zeta_data = pd.read_csv(zeta_file)
     u = mda.Universe(path_files[0], format="LAMMPSDUMP")
-    t_x = 68  # ps
-    time_step = 0.2  # ps
-    tx_frame = int(t_x / time_step)
+    # t_x = 68  # ps
+    time_step = 0.025  # ps
+    # tx_frame = int(t_x / time_step)
     calculator = ZetaCgCalculator(
         universe=u,
         zeta=zeta_data,
         shear_rate=0.0,
         time_step=time_step,
         start_index=0,
+        # end_index=2,
         cutoff=3.5,
     )
 
@@ -243,5 +252,5 @@ if __name__ == "__main__":
     plt.ylabel("Probability Density")
     plt.title("Distribution of Zeta_cg")
     plt.grid(True)
-    plt.savefig("/home/debian/water/TIP4P/2005/nvt/rst/equili/zeta_cg.png", dpi=300)
+    plt.savefig("/home/debian/water/TIP4P/Ice/test/5e-6/zeta_cg.png", dpi=300)
     plt.show()

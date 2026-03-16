@@ -20,7 +20,6 @@ import h5py
 import MDAnalysis as mda
 from MDAnalysis.analysis.hydrogenbonds.hbond_analysis import HydrogenBondAnalysis as HBA
 from MDAnalysis.lib.nsgrid import FastNS
-from MDAnalysis.lib.distances import apply_PBC
 from collections import defaultdict
 from tqdm import tqdm
 import pandas as pd
@@ -297,7 +296,9 @@ class HBMemoryEfficient:
             for line in fin:
                 frame, oidx, mind = line.strip().split(",")
                 key = (int(frame), int(oidx))
-                md = maxd.get(key, 0.0)
+                md = maxd.get(key)  # Returns None if atom has no hydrogen bonds
+                if md is None:
+                    continue  # Skip atoms without hydrogen bonds
                 zeta = float(mind) - float(md)
                 fout.write(f"{frame},{oidx},{zeta}\n")
 

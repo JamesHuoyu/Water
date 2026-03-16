@@ -1,0 +1,5 @@
+# for SEED in 11223 22334 33445 44556 55667 66778 77889 88990 99001 10112 29382 12984 38475 84756 47583 75834 58392 83920 39284 92847 12345 23456 34567 45678 56789 67890 78901 89012 99013 10123 
+for SEED in 11225
+do
+  mpirun -np 8 lmp_tip4p -in /home/debian/water/TIP4P/Ice/ice.lmp -var seed $SEED >> /home/debian/water/TIP4P/Ice/225/log/log.iso_225.lammps
+done

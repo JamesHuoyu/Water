@@ -32,15 +32,14 @@ class ISFCalculator:
             self.coords[ts.frame - start_index] = self.O_atoms.positions.copy()
         # 应用剪切流修正
         if shear_rate != 0.0:
-            self.shear_correction(shear_rate, time_step)
+            self.shear_correction(shear_rate, time_step, ref_y=25.0)
 
-    def shear_correction(self, shear_rate, time_step):
-        for frame in tqdm(range(self.frames), desc="Applying shear correction"):
-            if frame == 0:
-                continue
-            y_positions = self.coords[frame - 1, :, 1]
-            # 修正x坐标以消除剪切流影响
-            self.coords[frame:, :, 0] -= shear_rate * time_step * y_positions
+    def shear_correction(self, shear_rate, time_step, ref_y: float = 25.0):
+        T = self.coords.shape[0]
+        y = self.coords[:, :, 1] - ref_y  # shape (T, N)
+        gamma_dt = shear_rate * time_step
+        shear_disp = gamma_dt * np.cumsum(y, axis=0)  # shape (T, N)
+        self.coords[:, :, 0] -= shear_disp
 
     @staticmethod
     @jit(nopython=True, parallel=True, fastmath=True)
@@ -111,14 +110,16 @@ if __name__ == "__main__":
     #     "/home/debian/water/TIP4P/2005/2020/4096/multi/traj_1e-5_246.lammpstrj",
     # ]
     # pathfiles = ["/home/debian/water/TIP4P/2005/2020/4096/traj_2.5e-4_246_everystep.lammpstrj"]
-    pathfiles = ["/home/debian/water/TIP4P/Ice/225/dump_225_test.lammpstrj"]
+    pathfiles = [
+        "/home/debian/water/TIP4P/Ice/225/dump_225_test.lammpstrj",
+    ]
     # output_h5 = "test_isf_results.h5"
-    output_h5 = "/home/debian/water/TIP4P/Ice/225/shear/isf_results.h5"
+    output_h5 = "/home/debian/water/TIP4P/Ice/test/isf_results.h5"
     store = pd.HDFStore(output_h5)
     for pathfile in pathfiles:
         u = Universe(pathfile, format="LAMMPSDUMP")
-        # start_index = 2000  # 跳过前2000帧以避免初始非平衡影响
-        start_index = 0  # 从头开始计算
+        start_index = 0  # 跳过前2000帧以避免初始非平衡影响
+        # start_index = 0  # 从头开始计算
         # 初始化计算器
         isf_calculator = ISFCalculator(u, start_index=start_index)
 
@@ -134,7 +135,7 @@ if __name__ == "__main__":
 
         # 结果处理（保存）
         df = pd.DataFrame({"time_ps": times, "ISF": isf[0]})
-        filename = pathfile.split("/")[-1].replace(".lammpstrj", "_isf.csv")
+        # filename = pathfile.split("/")[-1].replace(".lammpstrj", "_isf.csv")
         # key = filename.split("_")[1]  # 对应的是剪切率部分例如"2.5e-5"
         key = "equili"  # 固定key以便对比
         store.put(key, df)

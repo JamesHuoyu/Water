@@ -1,0 +1,51 @@
+{
+  "dump_file": "/home/debian/water/TIP4P/Ice/test/iso/200000/traj/traj_5e-6_225_20000_10112_iso.lammpstrj",
+  "frame_range": [
+    0,
+    801
+  ],
+  "n_frames_analyzed": 801,
+  "n_oxygen": 4096,
+  "n_hydrogen": 8192,
+  "parameters": {
+    "oxygen_selection": "type 1",
+    "hydrogen_selection": "type 2",
+    "oo_cutoff_A": 3.5,
+    "hoo_cutoff_deg": 30.0,
+    "oh_cutoff_A": 1.25,
+    "neighbor_cutoff_A": 6.0,
+    "fallback_chunk": 256
+  },
+  "water_mapping": {
+    "strategy": "sequential_OHH",
+    "reference_frame": 0,
+    "sampled_frames": [
+      0,
+      200,
+      400,
+      600,
+      800
+    ],
+    "max_oh_distance_sampled_A": 0.9576774576779309,
+    "bad_oh_pairs_sampled": 0,
+    "notes": [
+      "Water mapping built from sequential O-H-H topology order.",
+      "Mapping validation passed on sampled frames."
+    ]
+  },
+  "totals": {
+    "rows_written_in_zeta_csv": 3280896,
+    "valid_zeta_rows": 3280889,
+    "rows_without_hbond_partner": 7,
+    "rows_still_missing_nonhb_after_fallback": 0,
+    "rows_using_full_fallback_for_nonhb": 0
+  },
+  "files": {
+    "hb_counts": "/home/debian/water/TIP4P/hb_counts_per_idx.csv",
+    "max_distances": "/home/debian/water/TIP4P/max_distance_per_idx.csv",
+    "nhb_distances": "/home/debian/water/TIP4P/nhb_min_distances.csv",
+    "zeta_all": "/home/debian/water/TIP4P/zeta.csv",
+    "zeta_valid": "/home/debian/water/TIP4P/zeta_valid.csv",
+    "frame_check": "/home/debian/water/TIP4P/self_check_frame_summary.csv"
+  }
+}

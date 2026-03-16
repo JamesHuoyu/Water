@@ -1,3 +1,8 @@
+"""
+Tetrahedral Order Parameter Calculator
+Optimized using MDAnalysis with efficient neighbor search and vectorized operations.
+"""
+
 import warnings
 
 warnings.filterwarnings("ignore", message="Reader has no dt information, set to 1.0 ps")
@@ -12,298 +17,294 @@ from tqdm import tqdm
 import gc
 
 
-class NeighborAnalysis:
+class TetrahedralOrderAnalysis:
+    """
+    Compute tetrahedral order parameter Q for water molecules.
+
+    The tetrahedral order parameter Q is calculated as:
+    Q = 1 - (3/8) * sum((cos(θ_jk) + 1/3)²) for all j<k pairs
+
+    where θ_jk is the angle between vectors from central atom to neighbor j and k.
+
+    For perfect tetrahedral geometry, Q = 1
+    """
+
     def __init__(
-        self, dump_file, out_dir="output", chunk_size=100, start_frame=None, end_frame=None
+        self,
+        dump_file,
+        out_dir="output",
+        n_neighbors=4,
+        start_frame=None,
+        end_frame=None,
+        neighbor_cutoff=3.5,  # Angstrom - typical H-bond distance
     ):
+        """
+        Initialize the tetrahedral order analyzer.
+
+        Parameters:
+        -----------
+        dump_file : str
+            Path to LAMMPS dump file
+        out_dir : str
+            Output directory for results
+        n_neighbors : int
+            Number of nearest neighbors to consider (default 4 for tetrahedral)
+        start_frame : int or None
+            Starting frame number
+        end_frame : int or None
+            Ending frame number
+        neighbor_cutoff : float
+            Cutoff distance for neighbor search in Angstrom
+        """
         self.dump_file = dump_file
         self.out_dir = out_dir
-        self.chunk_size = chunk_size
-        self.u = mda.Universe(dump_file, format="LAMMPSDUMP")
-        self.O_atoms = self.u.select_atoms("type 1")
-        self.global_O_indices = self.O_atoms.indices
-        self.n_frames = len(self.u.trajectory)
+        self.n_neighbors = n_neighbors
+        self.neighbor_cutoff = neighbor_cutoff
 
+        # Load universe
+        self.u = mda.Universe(dump_file, format="LAMMPSDUMP")
+
+        # Select oxygen atoms (assuming type 1 based on original code)
+        self.O_atoms = self.u.select_atoms("type 1")
+
+        if len(self.O_atoms) == 0:
+            raise ValueError("No oxygen atoms found. Check atom type selection.")
+
+        # Store global indices for reference
+        self.global_O_indices = self.O_atoms.indices
+        self.n_atoms = len(self.O_atoms)
+
+        # Frame range
+        self.n_frames = len(self.u.trajectory)
         self.start_frame = start_frame if start_frame is not None else 0
         self.end_frame = end_frame if end_frame is not None else self.n_frames
+
+        # Validate frame range
         if (
             self.start_frame < 0
             or self.end_frame > self.n_frames
             or self.start_frame >= self.end_frame
         ):
-            raise ValueError("Invalid start_frame or end_frame")
-        # 确保输出目录存在
+            raise ValueError(
+                f"Invalid frame range: {self.start_frame} to {self.end_frame} (total frames: {self.n_frames})"
+            )
+
+        # Ensure output directory exists
         os.makedirs(out_dir, exist_ok=True)
 
-    def get_four_neighbors(self, box):
-        positions = self.O_atoms.positions
-        dist_matrix = distance_array(positions, positions, box=box)
-        np.fill_diagonal(dist_matrix, np.inf)
-        neighbor_indices = np.argsort(dist_matrix, axis=1)[:, :4]
-        neighbor_distances = np.sort(dist_matrix, axis=1)[:, :4]
-        return neighbor_indices, neighbor_distances
+        print(f"Initialized analysis:")
+        print(f"  Trajectory: {dump_file}")
+        print(f"  Oxygen atoms: {self.n_atoms}")
+        print(
+            f"  Frames: {self.start_frame} to {self.end_frame-1} ({self.end_frame - self.start_frame} frames)"
+        )
 
-    def chunked_neighbor_analysis(self):
-        out_file = os.path.join(self.out_dir, "four_neighbors_distances.csv")
-        with open(out_file, "w") as f:
-            f.write("frame,O_idx,neighbor_rank,neighbor_O_idx,distance,ts_box\n")
-        print("Beginning chunked neighbors analysis...")
-        for start in tqdm(range(self.start_frame, self.end_frame, self.chunk_size), desc="Chunks"):
-            end = min(start + self.chunk_size, self.end_frame)
-            chunk_data = []
-            for frame in range(start, end):
-                self.u.trajectory[frame]
-                box = self.u.trajectory[frame].dimensions
-                neighbor_indices, neighbor_distances = self.get_four_neighbors(box)
-                for i, O_idx in enumerate(self.global_O_indices):
-                    for n in range(4):
-                        chunk_data.append(
-                            [
-                                frame,
-                                O_idx,
-                                n + 1,
-                                self.global_O_indices[neighbor_indices[i, n]],
-                                neighbor_distances[i, n],
-                                box,
-                            ]
-                        )
-            chunk_df = pd.DataFrame(
-                chunk_data,
-                columns=["frame", "O_idx", "neighbor_rank", "neighbor_O_idx", "distance", "ts_box"],
-            )
-            chunk_df.to_csv(out_file, mode="a", header=False, index=False)
-            del chunk_df, chunk_data  # 释放内存
-            gc.collect()
-        print(f"Neighbor analysis complete. Results saved to {out_file}")
-
-    def compute_q_chunked(self, df_path=None, chunk_size=1000, frame_chunk_size=10):
+    def _find_neighbors_vectorized(self, positions, box):
         """
-        Memory-efficient computation of tetrahedral order parameter Q using chunking.
+        Find n nearest neighbors using vectorized operations.
 
         Parameters:
         -----------
-        df_path : str or None
-            Path to the neighbors distance CSV file
-        chunk_size : int
-            Number of atoms to process at once
-        frame_chunk_size : int
-            Number of frames to process at once
+        positions : numpy.ndarray
+            Shape (n_atoms, 3) array of atomic positions
+        box : numpy.ndarray
+            Simulation box dimensions
+
+        Returns:
+        --------
+        neighbor_indices : numpy.ndarray
+            Shape (n_atoms, n_neighbors) array of neighbor indices
+        neighbor_distances : numpy.ndarray
+            Shape (n_atoms, n_neighbors) array of neighbor distances
         """
-        if df_path is None:
-            df_path = os.path.join(self.out_dir, "four_neighbors_distances.csv")
+        # Compute full distance matrix
+        dist_matrix = distance_array(positions, positions, box=box)
 
-        print("Computing tetrahedral order parameter Q (chunked)...")
+        # Set diagonal to infinity to exclude self
+        np.fill_diagonal(dist_matrix, np.inf)
 
-        # Check if file exists and get basic info
-        if not os.path.exists(df_path):
-            raise FileNotFoundError(f"Neighbors file not found: {df_path}")
+        # Find n nearest neighbors
+        neighbor_indices = np.argsort(dist_matrix, axis=1)[:, : self.n_neighbors]
+        neighbor_distances = np.take_along_axis(dist_matrix, neighbor_indices, axis=1)
 
-        # Read file info without loading all data
-        print("Analyzing input file...")
-        total_rows = sum(1 for _ in open(df_path)) - 1  # Subtract header
-        print(f"Total rows in input: {total_rows:,}")
+        return neighbor_indices, neighbor_distances
 
-        # Get unique frames and atoms for memory estimation
-        sample_df = pd.read_csv(df_path, nrows=10000)  # Sample first 10k rows
-        unique_frames = sample_df["frame"].nunique()
-        unique_atoms = sample_df["O_idx"].nunique()
-        print(f"Estimated frames: {unique_frames}, atoms: {unique_atoms}")
+    def _compute_q_vectorized(self, positions, neighbor_indices, box):
+        """
+        Compute tetrahedral order parameter Q using vectorized operations.
 
-        # Calculate processing parameters
-        total_frames = self.end_frame - self.start_frame
-        frames_per_chunk = min(frame_chunk_size, total_frames)
-        atoms_per_chunk = min(chunk_size, len(self.global_O_indices))
+        Parameters:
+        -----------
+        positions : numpy.ndarray
+            Shape (n_atoms, 3) array of atomic positions
+        neighbor_indices : numpy.ndarray
+            Shape (n_atoms, n_neighbors) array of neighbor indices
+        box : numpy.ndarray or None
+            Simulation box dimensions (None for non-periodic)
 
-        print(f"Processing {total_frames} frames in chunks of {frames_per_chunk}")
-        print(f"Processing {len(self.global_O_indices)} atoms in chunks of {atoms_per_chunk}")
+        Returns:
+        --------
+        q_values : numpy.ndarray
+            Shape (n_atoms,) array of Q values
+        """
+        n_atoms = len(positions)
+        n_neighbors = neighbor_indices.shape[1]
 
-        # Output file setup
-        out_file = os.path.join(self.out_dir, "tetrahedral_order_parameter_Q.csv")
+        if n_neighbors != 4:
+            raise ValueError(f"Expected 4 neighbors, got {n_neighbors}")
 
-        # Initialize output file with header
-        with open(out_file, "w") as f:
+        # Initialize Q values (set to NaN for atoms with insufficient neighbors)
+        q_values = np.full(n_atoms, np.nan)
+
+        # Get central atom positions and neighbor positions
+        central_positions = positions  # Shape: (n_atoms, 3)
+        neighbor_positions = positions[neighbor_indices]  # Shape: (n_atoms, n_neighbors, 3)
+
+        # Compute vectors from central atoms to neighbors
+        # Shape: (n_atoms, n_neighbors, 3)
+        r_vectors = neighbor_positions - central_positions[:, np.newaxis, :]
+
+        # Apply minimum image convention for periodic systems
+        if box is not None:
+            # Reshape for apply_PBC: (n_atoms * n_neighbors, 3)
+            r_flat = r_vectors.reshape(-1, 3)
+            r_flat_pbc = apply_PBC(r_flat, box)
+            r_vectors = r_flat_pbc.reshape(n_atoms, n_neighbors, 3)
+
+        # Normalize vectors
+        vec_norms = np.linalg.norm(r_vectors, axis=2, keepdims=True)
+        vec_norms[vec_norms == 0] = 1  # Avoid division by zero
+        r_vectors_normalized = r_vectors / vec_norms
+
+        # Compute cosine of angles between all pairs of vectors
+        # Shape: (n_atoms, n_neighbors, n_neighbors)
+        cos_theta = np.einsum("ijk,ilk->ijl", r_vectors_normalized, r_vectors_normalized)
+
+        # Clip to valid range [-1, 1] to avoid numerical errors
+        cos_theta = np.clip(cos_theta, -1.0, 1.0)
+
+        # Extract upper triangular elements (excluding diagonal)
+        # For 4 neighbors, there are 6 pairs: (0,1), (0,2), (0,3), (1,2), (1,3), (2,3)
+        triu_indices = np.triu_indices(n_neighbors, k=1)
+        cos_pairs = cos_theta[:, triu_indices[0], triu_indices[1]]  # Shape: (n_atoms, 6)
+
+        # Compute tetrahedral order parameter
+        # Q = 1 - (3/8) * sum((cos(θ_jk) + 1/3)²)
+        q_values = 1 - (3.0 / 8.0) * np.sum((cos_pairs + 1.0 / 3.0) ** 2, axis=1)
+
+        return q_values
+
+    def compute_q_direct(self, save_neighbors=True):
+        """
+        Compute tetrahedral order parameter Q directly from trajectory.
+        This is the most efficient method as it avoids intermediate files.
+
+        Parameters:
+        -----------
+        save_neighbors : bool
+            Whether to save neighbor information to CSV
+
+        Returns:
+        --------
+        q_df : pandas.DataFrame
+            DataFrame with columns: frame, O_idx, Q
+        """
+        out_q_file = os.path.join(self.out_dir, "tetrahedral_order_parameter_Q.csv")
+        out_neighbors_file = os.path.join(self.out_dir, "four_neighbors_distances.csv")
+
+        # Initialize output files
+        with open(out_q_file, "w") as f:
             f.write("frame,O_idx,Q\n")
 
-        total_q_values = 0
+        if save_neighbors:
+            with open(out_neighbors_file, "w") as f:
+                f.write("frame,O_idx,neighbor_rank,neighbor_O_idx,distance\n")
 
-        # Process in frame chunks
-        for frame_start in tqdm(
-            range(self.start_frame, self.end_frame, frames_per_chunk), desc="Frame chunks"
-        ):
-            frame_end = min(frame_start + frames_per_chunk, self.end_frame)
-            frame_list = list(range(frame_start, frame_end))
+        all_q_data = []
 
-            print(f"Processing frames {frame_start} to {frame_end-1}")
+        print("Computing tetrahedral order parameter Q (direct method)...")
 
-            # Load data for current frame chunk
-            try:
-                # Read only relevant frames to reduce memory
-                chunk_df = pd.read_csv(
-                    df_path,
-                    dtype={
-                        "frame": int,
-                        "O_idx": int,
-                        "neighbor_O_idx": int,
-                        "neighbor_rank": int,
-                        "distance": float,
-                    },
-                )
+        for frame in tqdm(range(self.start_frame, self.end_frame), desc="Processing frames"):
+            # Load frame
+            self.u.trajectory[frame]
+            positions = self.O_atoms.positions.copy()
+            box = self.u.trajectory.ts.dimensions
 
-                # Filter for current frames
-                chunk_df = chunk_df[chunk_df["frame"].isin(frame_list)]
+            # Find neighbors
+            neighbor_indices, neighbor_distances = self._find_neighbors_vectorized(positions, box)
 
-                if chunk_df.empty:
-                    print(f"No data found for frames {frame_start}-{frame_end-1}")
-                    continue
+            # Compute Q parameter
+            q_values = self._compute_q_vectorized(positions, neighbor_indices, box)
 
-                print(f"Loaded {len(chunk_df):,} rows for frames {frame_start}-{frame_end-1}")
+            # Collect results
+            frame_data = []
+            for i, O_idx in enumerate(self.global_O_indices):
+                frame_data.append({"frame": frame, "O_idx": O_idx, "Q": q_values[i]})
 
-            except Exception as e:
-                print(f"Error loading data for frames {frame_start}-{frame_end-1}: {e}")
-                continue
+                # Save neighbor info if requested
+                if save_neighbors:
+                    with open(out_neighbors_file, "a") as f:
+                        for n in range(self.n_neighbors):
+                            neighbor_idx = self.global_O_indices[neighbor_indices[i, n]]
+                            dist = neighbor_distances[i, n]
+                            f.write(f"{frame},{O_idx},{n+1},{neighbor_idx},{dist}\n")
 
-            # Process each frame in the chunk
-            frame_q_values = []
+            all_q_data.extend(frame_data)
 
-            for frame in frame_list:
-                if frame % 50 == 0:  # Progress update
-                    print(f"  Processing frame {frame}")
+            # Save results periodically (every 100 frames)
+            if (frame - self.start_frame + 1) % 100 == 0:
+                temp_df = pd.DataFrame(frame_data)
+                temp_df.to_csv(out_q_file, mode="a", header=False, index=False)
+                all_q_data = []  # Clear buffer
 
-                frame_data = chunk_df[chunk_df["frame"] == frame]
+        # Save remaining data
+        if all_q_data:
+            pd.DataFrame(all_q_data).to_csv(out_q_file, mode="a", header=False, index=False)
 
-                if frame_data.empty:
-                    continue
+        print(f"Q computation complete. Results saved to {out_q_file}")
+        if save_neighbors:
+            print(f"Neighbor information saved to {out_neighbors_file}")
 
-                # Load trajectory frame for positions
-                try:
-                    self.u.trajectory[frame]
-                    current_positions = self.O_atoms.positions.copy()
-                    current_box = self.u.trajectory.ts.dimensions
-                except Exception as e:
-                    print(f"Error loading trajectory frame {frame}: {e}")
-                    continue
+        # Return results
+        return pd.read_csv(out_q_file)
 
-                # Process atoms in chunks for this frame
-                frame_atoms = frame_data["O_idx"].unique()
-
-                for atom_start_idx in range(0, len(frame_atoms), atoms_per_chunk):
-                    atom_end_idx = min(atom_start_idx + atoms_per_chunk, len(frame_atoms))
-                    atom_chunk = frame_atoms[atom_start_idx:atom_end_idx]
-
-                    # Process each atom in the current chunk
-                    for O_idx in atom_chunk:
-                        # Skip if not in our global indices
-                        if O_idx not in self.global_O_indices:
-                            continue
-
-                        # Get neighbors for this atom
-                        neighbors = frame_data[frame_data["O_idx"] == O_idx].sort_values(
-                            "neighbor_rank"
-                        )
-
-                        if len(neighbors) < 4:
-                            # Not enough neighbors for tetrahedral calculation
-                            continue
-
-                        # Get central atom position
-                        try:
-                            central_atom_mask = self.O_atoms.indices == O_idx
-                            if not np.any(central_atom_mask):
-                                continue
-
-                            O_pos = current_positions[central_atom_mask][0]
-
-                            # Get neighbor positions and calculate vectors
-                            r_vectors = []
-
-                            for _, row in neighbors.head(
-                                4
-                            ).iterrows():  # Take only first 4 neighbors
-                                neighbor_idx = row["neighbor_O_idx"]
-
-                                # Find neighbor position
-                                neighbor_mask = self.O_atoms.indices == neighbor_idx
-                                if not np.any(neighbor_mask):
-                                    continue
-
-                                neighbor_pos = current_positions[neighbor_mask][0]
-
-                                # Apply minimum image convention
-                                vec = neighbor_pos - O_pos
-                                if current_box is not None:
-                                    vec = apply_PBC(vec.reshape(1, -1), current_box)[0]
-
-                                # Normalize vector
-                                vec_norm = np.linalg.norm(vec)
-                                if vec_norm > 0:
-                                    r_vectors.append(vec / vec_norm)
-
-                            # Calculate Q parameter if we have exactly 4 vectors
-                            if len(r_vectors) == 4:
-                                r_vectors = np.array(r_vectors)
-
-                                # Calculate dot products between all pairs
-                                cos_theta = np.dot(r_vectors, r_vectors.T)
-                                cos_theta = np.clip(cos_theta, -1.0, 1.0)
-
-                                # Get upper triangular elements (excluding diagonal)
-                                triu_indices = np.triu_indices(4, k=1)
-                                cos_triu = cos_theta[triu_indices]
-
-                                # Calculate tetrahedral order parameter
-                                # Q = 1 - (3/8) * sum((cos(θ_jk) + 1/3)²) for all j<k pairs
-                                q = 1 - (3 / 8) * np.sum((cos_triu + 1 / 3) ** 2)
-
-                                frame_q_values.append({"frame": frame, "O_idx": O_idx, "Q": q})
-
-                        except Exception as e:
-                            print(f"Error processing atom {O_idx} in frame {frame}: {e}")
-                            continue
-
-            # Save results for this frame chunk
-            if frame_q_values:
-                chunk_results_df = pd.DataFrame(frame_q_values)
-
-                # Append to output file
-                chunk_results_df.to_csv(out_file, mode="a", header=False, index=False)
-
-                total_q_values += len(frame_q_values)
-                print(
-                    f"  Saved {len(frame_q_values)} Q values for frames {frame_start}-{frame_end-1}"
-                )
-
-            # Clean up memory
-            del chunk_df, frame_q_values
-            if "chunk_results_df" in locals():
-                del chunk_results_df
-            gc.collect()
-
-        print(f"Q computation complete. Total {total_q_values} values saved to {out_file}")
-
-    def compute_q_streaming(self, df_path=None, batch_size=10000):
+    def compute_q_from_neighbors(self, neighbors_file=None):
         """
-        Alternative streaming approach that processes the CSV in batches.
-        Even more memory efficient for very large datasets.
+        Compute Q parameter from pre-computed neighbor file.
+        Useful if you want to recompute Q with different parameters.
+
+        Parameters:
+        -----------
+        neighbors_file : str or None
+            Path to neighbors CSV file
+
+        Returns:
+        --------
+        q_df : pandas.DataFrame
+            DataFrame with columns: frame, O_idx, Q
         """
-        if df_path is None:
-            df_path = os.path.join(self.out_dir, "four_neighbors_distances.csv")
+        if neighbors_file is None:
+            neighbors_file = os.path.join(self.out_dir, "four_neighbors_distances.csv")
 
-        print("Computing tetrahedral order parameter Q (streaming)...")
+        if not os.path.exists(neighbors_file):
+            raise FileNotFoundError(f"Neighbors file not found: {neighbors_file}")
 
-        out_file = os.path.join(self.out_dir, "tetrahedral_order_parameter_Q.csv")
+        out_q_file = os.path.join(self.out_dir, "tetrahedral_order_parameter_Q.csv")
 
-        # Initialize output file
-        with open(out_file, "w") as f:
+        # Initialize output
+        with open(out_q_file, "w") as f:
             f.write("frame,O_idx,Q\n")
 
-        total_processed = 0
+        print("Computing Q from neighbors file...")
+
+        # Read neighbors file in chunks
+        all_q_data = []
         current_frame = None
-        frame_data_buffer = []
+        frame_neighbors = {}
 
-        # Read CSV in chunks
         chunk_iter = pd.read_csv(
-            df_path,
-            chunksize=batch_size,
+            neighbors_file,
+            chunksize=10000,
             dtype={
                 "frame": int,
                 "O_idx": int,
@@ -313,132 +314,222 @@ class NeighborAnalysis:
             },
         )
 
-        for chunk_num, chunk in enumerate(tqdm(chunk_iter, desc="Processing CSV chunks")):
-
-            # Filter for our frame range
-            chunk = chunk[(chunk["frame"] >= self.start_frame) & (chunk["frame"] < self.end_frame)]
-
-            if chunk.empty:
-                continue
-
-            # Group by frame and process
+        for chunk in tqdm(chunk_iter, desc="Processing neighbor chunks"):
+            # Process each frame in the chunk
             for frame_id, frame_group in chunk.groupby("frame"):
+                if frame_id < self.start_frame or frame_id >= self.end_frame:
+                    continue
 
-                if frame_id != current_frame:
-                    # Process previous frame if exists
-                    if frame_data_buffer:
-                        q_results = self._process_frame_q(frame_data_buffer, current_frame)
-                        if q_results:
-                            # Save results
-                            results_df = pd.DataFrame(q_results)
-                            results_df.to_csv(out_file, mode="a", header=False, index=False)
-                            total_processed += len(q_results)
+                # If we've completed processing a frame, compute Q
+                if current_frame is not None and frame_id != current_frame:
+                    q_results = self._compute_q_for_frame(current_frame, frame_neighbors)
+                    all_q_data.extend(q_results)
+                    frame_neighbors = {}
 
-                    # Start new frame
-                    current_frame = frame_id
-                    frame_data_buffer = []
+                current_frame = frame_id
 
-                # Add to buffer
-                frame_data_buffer.extend(frame_group.to_dict("records"))
+                # Accumulate neighbors for current frame
+                for O_idx in frame_group["O_idx"].unique():
+                    atom_neighbors = frame_group[frame_group["O_idx"] == O_idx]
+                    frame_neighbors[O_idx] = atom_neighbors
 
-            if chunk_num % 10 == 0:  # Progress update
-                print(
-                    f"Processed {chunk_num * batch_size:,} rows, {total_processed} Q values calculated"
-                )
+        # Process last frame
+        if current_frame is not None:
+            q_results = self._compute_q_for_frame(current_frame, frame_neighbors)
+            all_q_data.extend(q_results)
 
-        # Process final frame
-        if frame_data_buffer and current_frame is not None:
-            q_results = self._process_frame_q(frame_data_buffer, current_frame)
-            if q_results:
-                results_df = pd.DataFrame(q_results)
-                results_df.to_csv(out_file, mode="a", header=False, index=False)
-                total_processed += len(q_results)
+        # Save results
+        if all_q_data:
+            pd.DataFrame(all_q_data).to_csv(out_q_file, mode="a", header=False, index=False)
 
-        print(f"Streaming Q computation complete. {total_processed} values saved to {out_file}")
-        return (
-            pd.read_csv(out_file) if os.path.getsize(out_file) > 50 else None
-        )  # Only load if file has data
+        print(f"Q computation complete. Results saved to {out_q_file}")
 
-    def _process_frame_q(self, frame_data, frame_id):
+        return pd.read_csv(out_q_file)
+
+    def _compute_q_for_frame(self, frame_id, frame_neighbors):
         """
-        Helper function to process Q calculation for a single frame.
+        Compute Q for a single frame using neighbor information.
+
+        Parameters:
+        -----------
+        frame_id : int
+            Frame number
+        frame_neighbors : dict
+            Dictionary mapping O_idx to neighbor DataFrame
+
+        Returns:
+        --------
+        results : list
+            List of dictionaries with frame, O_idx, Q
         """
-        try:
-            # Load trajectory frame
-            self.u.trajectory[frame_id]
-            current_positions = self.O_atoms.positions.copy()
-            current_box = self.u.trajectory.ts.dimensions
-            # print(f"Processing frame {frame_id} with box {current_box}")  # Debug info
-        except:
-            return []
+        # Load frame
+        self.u.trajectory[frame_id]
+        positions = self.O_atoms.positions.copy()
+        box = self.u.trajectory.ts.dimensions
 
-        # Convert to DataFrame for easier processing
-        frame_df = pd.DataFrame(frame_data)
-        q_results = []
+        results = []
 
-        # Process each unique atom
-        for O_idx in frame_df["O_idx"].unique():
-            if O_idx not in self.global_O_indices:
-                continue
-
-            neighbors = frame_df[frame_df["O_idx"] == O_idx].sort_values("neighbor_rank")
-
+        for O_idx, neighbors in frame_neighbors.items():
             if len(neighbors) < 4:
                 continue
 
-            try:
-                # Get positions and calculate Q
-                central_mask = self.O_atoms.indices == O_idx
-                if not np.any(central_mask):
-                    continue
+            # Get neighbor indices
+            neighbors_sorted = neighbors.sort_values("neighbor_rank").head(4)
+            neighbor_indices = [
+                self._get_local_idx(n_idx) for n_idx in neighbors_sorted["neighbor_O_idx"]
+            ]
 
-                O_pos = current_positions[central_mask][0]
-                # O_pos = apply_PBC(O_pos.reshape(1, -1), current_box)[0]
-                r_vectors = []
-
-                for _, row in neighbors.head(4).iterrows():
-                    neighbor_mask = self.O_atoms.indices == row["neighbor_O_idx"]
-                    if not np.any(neighbor_mask):
-                        continue
-                    neighbor_pos = current_positions[neighbor_mask][0]
-                    # neighbor_pos = apply_PBC(neighbor_pos.reshape(1, -1), current_box)[0]
-                    # print(f"Neighbor pos: {neighbor_pos}")  # Debug info
-                    # print(f"O pos: {O_pos}")  # Debug info
-                    vec = neighbor_pos - O_pos
-                    box_length = current_box[:3]
-                    vec -= box_length * np.round(vec / box_length)
-                    vec_norm = np.linalg.norm(vec)
-                    if vec_norm > 0:
-                        r_vectors.append(vec / vec_norm)
-
-                if len(r_vectors) == 4:
-                    r_vectors = np.array(r_vectors)
-                    cos_theta = np.dot(r_vectors, r_vectors.T)
-                    cos_theta = np.clip(cos_theta, -1.0, 1.0)
-                    triu_indices = np.triu_indices(4, k=1)
-                    cos_triu = cos_theta[triu_indices]
-                    q = 1 - (3 / 8) * np.sum((cos_triu + 1 / 3) ** 2)
-                    q_results.append({"frame": frame_id, "O_idx": O_idx, "Q": q})
-
-            except Exception as e:
+            if None in neighbor_indices:
                 continue
 
-        return q_results
+            # Get positions
+            central_pos = positions[self._get_local_idx(O_idx)]
+            neighbor_pos = positions[neighbor_indices]
+
+            # Compute Q
+            neighbor_indices_array = np.array([neighbor_indices])
+            q_values = self._compute_q_vectorized(
+                np.array([central_pos]), neighbor_indices_array, box
+            )
+
+            results.append({"frame": frame_id, "O_idx": O_idx, "Q": q_values[0]})
+
+        return results
+
+    def _get_local_idx(self, global_idx):
+        """Get local index from global index."""
+        try:
+            return np.where(self.global_O_indices == global_idx)[0][0]
+        except IndexError:
+            return None
+
+    def analyze_statistics(self, q_df=None):
+        """
+        Compute statistics of Q parameter distribution.
+
+        Parameters:
+        -----------
+        q_df : pandas.DataFrame or None
+            DataFrame with Q values. If None, load from file.
+
+        Returns:
+        --------
+        stats : dict
+            Dictionary of statistics
+        """
+        if q_df is None:
+            q_file = os.path.join(self.out_dir, "tetrahedral_order_parameter_Q.csv")
+            if not os.path.exists(q_file):
+                raise FileNotFoundError(f"Q file not found: {q_file}")
+            q_df = pd.read_csv(q_file)
+
+        # Filter out NaN values
+        valid_q = q_df["Q"].dropna()
+
+        stats = {
+            "mean": valid_q.mean(),
+            "std": valid_q.std(),
+            "min": valid_q.min(),
+            "max": valid_q.max(),
+            "median": valid_q.median(),
+            "percentile_25": valid_q.quantile(0.25),
+            "percentile_75": valid_q.quantile(0.75),
+        }
+
+        # Print statistics
+        print("\n=== Tetrahedral Order Parameter Statistics ===")
+        print(f"Total Q values: {len(valid_q)}")
+        print(f"Mean:  {stats['mean']:.4f} ± {stats['std']:.4f}")
+        print(f"Median: {stats['median']:.4f}")
+        print(f"Range:  [{stats['min']:.4f}, {stats['max']:.4f}]")
+        print(f"25th-75th percentile: [{stats['percentile_25']:.4f}, {stats['percentile_75']:.4f}]")
+
+        # Interpretation
+        if stats["mean"] > 0.8:
+            print("Interpretation: High tetrahedral order (ice-like)")
+        elif stats["mean"] > 0.5:
+            print("Interpretation: Moderate tetrahedral order (liquid water)")
+        else:
+            print("Interpretation: Low tetrahedral order (disordered)")
+
+        return stats
+
+    def visualize_q_distribution(self, q_df=None, save_path=None):
+        """
+        Visualize Q parameter distribution.
+
+        Parameters:
+        -----------
+        q_df : pandas.DataFrame or None
+            DataFrame with Q values
+        save_path : str or None
+            Path to save figure
+        """
+        if q_df is None:
+            q_file = os.path.join(self.out_dir, "tetrahedral_order_parameter_Q.csv")
+            if not os.path.exists(q_file):
+                raise FileNotFoundError(f"Q file not found: {q_file}")
+            q_df = pd.read_csv(q_file)
+
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+        # Overall distribution
+        axes[0].hist(q_df["Q"].dropna(), bins=50, edgecolor="black", alpha=0.7)
+        axes[0].set_xlabel("Tetrahedral Order Parameter Q")
+        axes[0].set_ylabel("Frequency")
+        axes[0].set_title("Overall Q Distribution")
+        axes[0].axvline(
+            q_df["Q"].mean(), color="red", linestyle="--", label=f'Mean: {q_df["Q"].mean():.3f}'
+        )
+        axes[0].legend()
+
+        # Q vs Frame
+        frame_stats = q_df.groupby("frame")["Q"].agg(["mean", "std"]).reset_index()
+        axes[1].errorbar(
+            frame_stats["frame"],
+            frame_stats["mean"],
+            yerr=frame_stats["std"],
+            fmt="o",
+            capsize=3,
+            alpha=0.6,
+        )
+        axes[1].set_xlabel("Frame")
+        axes[1].set_ylabel("Q")
+        axes[1].set_title("Q vs Frame")
+        axes[1].grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        if save_path is None:
+            save_path = os.path.join(self.out_dir, "q_distribution.png")
+
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Figure saved to {save_path}")
+        plt.close()
+
+        return fig
 
 
 if __name__ == "__main__":
-    dump_file = "/home/debian/water/TIP4P/2005/traj_2.5e-5_246.lammpstrj"
-    out_dir = "/home/debian/water/TIP4P/2005/2020/rst"
-    chunk_size = 100  # Adjust based on memory capacity
-    start_frame = 2000
+    # Configuration
+    dump_file = "TIP4P/Ice/test/traj_5e-6_225_100000.lammpstrj"
+    out_dir = "/home/debian/water/TIP4P/Ice/test/5e-6"
+    start_frame = 0
     end_frame = None  # Process all frames
 
-    analyzer = NeighborAnalysis(
+    # Initialize analyzer
+    analyzer = TetrahedralOrderAnalysis(
         dump_file=dump_file,
         out_dir=out_dir,
-        chunk_size=chunk_size,
         start_frame=start_frame,
         end_frame=end_frame,
     )
-    analyzer.chunked_neighbor_analysis()
-    analyzer.compute_q_streaming(None, 5000)  # Use default path for distances CSV
+
+    # Compute Q parameter (most efficient method)
+    q_df = analyzer.compute_q_direct(save_neighbors=True)
+
+    # Analyze statistics
+    stats = analyzer.analyze_statistics(q_df)
+
+    # Visualize results
+    analyzer.visualize_q_distribution(q_df)
