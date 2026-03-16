@@ -1,0 +1,51 @@
+{
+  "dump_file": "/home/debian/water/TIP4P/2005/dump_225_test.lammpstrj",
+  "frame_range": [
+    0,
+    1001
+  ],
+  "n_frames_analyzed": 1001,
+  "n_oxygen": 4096,
+  "n_hydrogen": 8192,
+  "parameters": {
+    "oxygen_selection": "type 1",
+    "hydrogen_selection": "type 2",
+    "oo_cutoff_A": 3.5,
+    "hoo_cutoff_deg": 30.0,
+    "oh_cutoff_A": 1.25,
+    "neighbor_cutoff_A": 6.0,
+    "fallback_chunk": 256
+  },
+  "water_mapping": {
+    "strategy": "sequential_OHH",
+    "reference_frame": 0,
+    "sampled_frames": [
+      0,
+      250,
+      500,
+      750,
+      1000
+    ],
+    "max_oh_distance_sampled_A": 0.9573377810572892,
+    "bad_oh_pairs_sampled": 0,
+    "notes": [
+      "Water mapping built from sequential O-H-H topology order.",
+      "Mapping validation passed on sampled frames."
+    ]
+  },
+  "totals": {
+    "rows_written_in_zeta_csv": 4100096,
+    "valid_zeta_rows": 4100087,
+    "rows_without_hbond_partner": 9,
+    "rows_still_missing_nonhb_after_fallback": 0,
+    "rows_using_full_fallback_for_nonhb": 0
+  },
+  "files": {
+    "hb_counts": "/home/debian/water/TIP4P/2005/rstforhoofixed/hb_counts_per_idx.csv",
+    "max_distances": "/home/debian/water/TIP4P/2005/rstforhoofixed/max_distance_per_idx.csv",
+    "nhb_distances": "/home/debian/water/TIP4P/2005/rstforhoofixed/nhb_min_distances.csv",
+    "zeta_all": "/home/debian/water/TIP4P/2005/rstforhoofixed/zeta.csv",
+    "zeta_valid": "/home/debian/water/TIP4P/2005/rstforhoofixed/zeta_valid.csv",
+    "frame_check": "/home/debian/water/TIP4P/2005/rstforhoofixed/self_check_frame_summary.csv"
+  }
+}
