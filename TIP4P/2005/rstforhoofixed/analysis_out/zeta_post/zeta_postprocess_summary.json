@@ -1,0 +1,18 @@
+{
+  "zeta_distribution": {
+    "mean": 0.6051699897207549,
+    "std": 0.342610327925155,
+    "median": 0.62934286
+  },
+  "zeta_autocorr": {
+    "lag1_autocorr": 0.3276699500692468
+  },
+  "zeta_cg_distribution": {
+    "mean": 0.5984604299347316,
+    "std": 0.2203196530956782,
+    "median": 0.6082878342751884
+  },
+  "zeta_cg_autocorr": {
+    "lag1_autocorr": 0.43099873778230413
+  }
+}

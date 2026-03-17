@@ -1,0 +1,25 @@
+{
+  "dump_file": "/home/debian/water/TIP4P/2005/dump_225_test.lammpstrj",
+  "oo_cutoff": 3.5,
+  "hoo_cutoff": 30.0,
+  "oh_cutoff": 1.25,
+  "start_frame": 0,
+  "end_frame": 1001,
+  "n_frames": 1001,
+  "n_oxygen": 4096,
+  "mapping_strategy": "sequential",
+  "mapping_report": {
+    "max_oh_distance_sampled": 0.9573377810572892,
+    "bad_oh_pairs_sampled": 0,
+    "sampled_frames": [
+      0,
+      250,
+      500,
+      750,
+      1000
+    ],
+    "notes": [
+      "Mapping built from sequential O-H-H order"
+    ]
+  }
+}

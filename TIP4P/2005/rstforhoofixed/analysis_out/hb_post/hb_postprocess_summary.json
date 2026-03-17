@@ -1,0 +1,19 @@
+{
+  "count_distribution": {
+    "new_mean_n_hb": 3.9305147977022976,
+    "new_frac4": 0.8516895701954296
+  },
+  "lifetimes": {
+    "n_pairs_seen": 28866,
+    "mean_continuous_lifetime_frames": 36.45015425536727,
+    "median_continuous_lifetime_frames": 7.0
+  },
+  "count_autocorr": {
+    "mean_std_n_hb": 0.3826689929308008,
+    "lag1_autocorr": 0.4253929299899977
+  },
+  "partner_exchange": {
+    "mean_first_change_time_frames": 21.808694743614772,
+    "mean_full_renewal_time_frames": 365.1253534532868
+  }
+}
