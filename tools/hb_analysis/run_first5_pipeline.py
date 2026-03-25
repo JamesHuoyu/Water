@@ -41,26 +41,26 @@ def main() -> None:
     zeta_dir.mkdir(parents=True, exist_ok=True)
 
     py = sys.executable
-    run(
-        [
-            py,
-            "/home/debian/water/tools/hb_analysis/hb_extract_hoo_timeseries.py",
-            "--dump_file",
-            args.dump_file,
-            "--out_dir",
-            str(hb_dir),
-            "--oo_cutoff",
-            str(args.oo_cutoff),
-            "--hoo_cutoff",
-            str(args.hoo_cutoff),
-            "--oh_cutoff",
-            str(args.oh_cutoff),
-        ]
-    )
+    # run(
+    #     [
+    #         py,
+    #         "/home/debian/water/tools/hb_analysis/hb_extract_hoo_timeseries.py",
+    #         "--dump_file",
+    #         args.dump_file,
+    #         "--out_dir",
+    #         str(hb_dir),
+    #         "--oo_cutoff",
+    #         str(args.oo_cutoff),
+    #         "--hoo_cutoff",
+    #         str(args.hoo_cutoff),
+    #         "--oh_cutoff",
+    #         str(args.oh_cutoff),
+    #     ]
+    # )
 
     cmd = [
         py,
-        "/home/debian/water/tools/hb_analysis/hb_dynamics_postprocess.py",
+        "hb_analysis/hb_dynamics_postprocess_fixed.py",
         "--hb_dir",
         str(hb_dir),
         "--out_dir",
@@ -78,7 +78,7 @@ def main() -> None:
         run(
             [
                 py,
-                "/home/debian/water/tools/hb_analysis/zeta_cg_hoo_updated.py",
+                "hb_analysis/zeta_cg_hoo_updated.py",
                 "--dump_file",
                 args.dump_file,
                 "--zeta_file",
@@ -94,7 +94,7 @@ def main() -> None:
 
     cmd = [
         py,
-        "/home/debian/water/tools/hb_analysis/zeta_dynamics_postprocess.py",
+        "hb_analysis/zeta_dynamics_postprocess.py",
         "--zeta_csv",
         args.zeta_csv,
         "--zeta_cg_csv",

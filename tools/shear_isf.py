@@ -111,10 +111,10 @@ if __name__ == "__main__":
     # ]
     # pathfiles = ["/home/debian/water/TIP4P/2005/2020/4096/traj_2.5e-4_246_everystep.lammpstrj"]
     pathfiles = [
-        "/home/debian/water/TIP4P/Ice/225/dump_225_test.lammpstrj",
+        "/home/debian/water/TIP4P/Ice/test/5e-6/traj_5e-6_225_100000.lammpstrj",
     ]
     # output_h5 = "test_isf_results.h5"
-    output_h5 = "/home/debian/water/TIP4P/Ice/test/isf_results.h5"
+    output_h5 = "/home/debian/water/TIP4P/Ice/test/5e-6/isf_results.h5"
     store = pd.HDFStore(output_h5)
     for pathfile in pathfiles:
         u = Universe(pathfile, format="LAMMPSDUMP")
@@ -130,14 +130,14 @@ if __name__ == "__main__":
         # 计算时间原点平均的ISF
         isf = isf_calculator.time_origin_average(q_vectors)
         # time_steps = 0.05  # ps
-        time_steps = 0.2  # ps
+        time_steps = 0.025  # ps
         times = np.arange(isf.shape[1]) * time_steps
 
         # 结果处理（保存）
         df = pd.DataFrame({"time_ps": times, "ISF": isf[0]})
-        # filename = pathfile.split("/")[-1].replace(".lammpstrj", "_isf.csv")
-        # key = filename.split("_")[1]  # 对应的是剪切率部分例如"2.5e-5"
-        key = "equili"  # 固定key以便对比
+        filename = pathfile.split("/")[-1].replace(".lammpstrj", "_isf.csv")
+        key = filename.split("_")[1]  # 对应的是剪切率部分例如"2.5e-5"
+        # key = "equili"  # 固定key以便对比
         store.put(key, df)
         print(f"ISF results saved to {output_h5} under key '{key}'")
     store.close()

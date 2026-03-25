@@ -41,12 +41,12 @@ def plot_chi(
 
 # 示例使用
 plt.figure(figsize=(7, 5))
-plot_chi("/home/debian/water/TIP4P/Ice/test/test_chi4_results.h5", "1e-6")
-plot_chi("/home/debian/water/TIP4P/Ice/test/test_chi4_results.h5", "5e-6")
+# plot_chi("/home/debian/water/TIP4P/Ice/test/h5/chi4_results.h5", "1e-6")
+plot_chi("/home/debian/water/TIP4P/Ice/test/h5/chi4_results.h5", "5e-6")
 # plot_chi("/home/debian/water/TIP4P/Ice/test/test_chi4_results.h5", "1e-5")
-plot_chi("/home/debian/water/TIP4P/Ice/test/test_chi4_results.h5", "5e-5")
-plot_chi("/home/debian/water/TIP4P/Ice/test/test_chi4_results.h5", "1e-4")
-plot_chi("/home/debian/water/TIP4P/Ice/test/test_chi4_results.h5", "equili")
+# plot_chi("/home/debian/water/TIP4P/Ice/test/test_chi4_results.h5", "5e-5")
+# plot_chi("/home/debian/water/TIP4P/Ice/test/test_chi4_results.h5", "1e-4")
+plot_chi("/home/debian/water/TIP4P/Ice/test/h5/chi4_results.h5", "equili")
 plt.xlabel("Time (ps)")
 plt.ylabel(r"$\chi_4$")
 plt.title(r"$\chi_4$ vs Time")
